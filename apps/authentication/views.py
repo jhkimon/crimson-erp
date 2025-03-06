@@ -1,42 +1,16 @@
-from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import make_password
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.authtoken.models import Token
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.serializers import ModelSerializer
 from rest_framework.parsers import JSONParser
 
-
-from django.contrib.auth.models import User
-from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import make_password
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.serializers import ModelSerializer
-from rest_framework.parsers import JSONParser
+# Serializer
+from apps.authentication.serializers import RegisterSerializer
+# 문서화
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
-
-# 🔹 User Serializer for Signup
-class RegisterSerializer(ModelSerializer):
-    class Meta:
-        model = User
-        fields = ("username", "email", "password")
-
-    def create(self, validated_data):
-        validated_data["password"] = make_password(validated_data["password"])  # Hash password
-        return super().create(validated_data)
 
 
 # 🔹 Signup API
@@ -45,16 +19,28 @@ class SignupView(APIView):
     parser_classes = [JSONParser]
 
     @swagger_auto_schema(
+        operation_summary="회원가입",
+        operation_description="새로운 사용자를 등록하고, JWT 토큰을 반환합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "email", "password"],
             properties={
-                "username": openapi.Schema(type=openapi.TYPE_STRING, description="User's unique username"),
-                "email": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="User's email"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="User's password"),
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디 (유니크)"),
+                "email": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="이메일"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="비밀번호"),
             },
         ),
-        responses={201: "Signup successful", 400: "Invalid input"},
+        responses={
+            201: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "message": openapi.Schema(type=openapi.TYPE_STRING, description="성공 메시지"),
+                    "access_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 액세스 토큰"),
+                    "refresh_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 리프레시 토큰"),
+                },
+            ),
+            400: "잘못된 입력",
+        },
     )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -77,15 +63,27 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
+        operation_summary="로그인",
+        operation_description="사용자 로그인 후 JWT 토큰을 반환합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "password"],
             properties={
-                "username": openapi.Schema(type=openapi.TYPE_STRING, description="User's unique username"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="User's password"),
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="비밀번호"),
             },
         ),
-        responses={200: "Login successful", 401: "Invalid credentials"},
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "message": openapi.Schema(type=openapi.TYPE_STRING, description="성공 메시지"),
+                    "access_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 액세스 토큰"),
+                    "refresh_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 리프레시 토큰"),
+                },
+            ),
+            401: "잘못된 로그인 정보",
+        },
     )
     def post(self, request):
         username = request.data.get("username")
@@ -105,19 +103,26 @@ class LoginView(APIView):
             )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
+
 # 🔹 Logout API
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
+        operation_summary="로그아웃",
+        operation_description="리프레시 토큰을 블랙리스트에 등록하여 로그아웃을 수행합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["refresh_token"],
             properties={
-                "refresh_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT refresh token"),
+                "refresh_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 리프레시 토큰"),
             },
         ),
-        responses={200: "Logged out successfully", 400: "Invalid token"},
+        responses={
+            200: "로그아웃 성공",
+            400: "잘못된 토큰",
+        },
+        security=[{"BearerAuth": []}],
     )
     def post(self, request):
         refresh_token = request.data.get("refresh_token")
