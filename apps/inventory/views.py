@@ -3,8 +3,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import InventoryItem
-from .serializers import InventoryItemSerializer
+from .models import InventoryItem, ProductVariant
+from .serializers import InventoryItemSerializer, ProductVariantSerializer
+
 
 class InventoryListView(APIView):
     """
@@ -34,3 +35,23 @@ class InventoryListView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProductVariantDetailView(APIView):
+    """
+    GET: 특정 제품의 상세 정보 조회
+    PUT: 특정 제품  정보 수정
+    DELETE: 특정 제품 정보 삭제
+    """
+
+    @swagger_auto_schema(operation_summary="특정 품목의 정보 상세 조회",
+                         operation_description="URL 파라미터로 전달된 variant_id에 해당하는 특정 제품의 정보를 조회합니다.",
+                         responses={200: ProductVariantSerializer, 404: "Not Found"})
+    def get(self, request, variant_id):
+        try:
+            variant = ProductVariant.objects.get(id=variant_id)
+        except ProductVariant.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProductVariantSerializer(variant)
+        return Response(serializer.data, status=status.HTTP_200_OK)
