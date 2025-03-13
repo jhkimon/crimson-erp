@@ -16,13 +16,14 @@ class InventoryItem(models.Model):
 
 
 class ProductVariant(models.Model):
-    inventory_item = models.ForeignKey(
+    product = models.ForeignKey(
         InventoryItem, on_delete=models.CASCADE, related_name="variatns")
     variant_code = models.CharField(max_length=50, unique=True)
     option = models.CharField(max_length=255)
     stock = models.PositiveIntegerField()
     price = models.PositiveIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "product_variants"

@@ -19,4 +19,15 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductVariant
-        fields = '__all__'
+        fields = [
+            'id',                   # variant_id
+            'inventory_item',       # 품목명 및 품목코드
+            'inventory_item_id',    # product_id
+            'variant_code',         # variant_code
+            'option',               # 옵션
+            'stock',                # 재고량
+            'price',                # 가격
+            'created_at',           # 생성일시
+            'updated_at'            # 수정일시
+        ]
+        read_only_fields = ['id', 'created_at']
