@@ -11,7 +11,7 @@ class InventoryItem(models.Model):
         db_table = "products"
 
     def __str__(self):
-        # 객체 호출 시 '상품코드 - 상품명' 형태로 반환환
+        # 호출 시 '상품코드 - 상품명' 형태로 반환
         return f"{self.product_code} - {self.name}"
 
 
@@ -29,4 +29,5 @@ class ProductVariant(models.Model):
         db_table = "product_variants"
 
     def __str__(self):
-        return f"{self.variant_code}({self.option})"  # 객체 호출 시 '
+        # 객체 호출 시 '(상품 상세코드)(옵션)' 으로 반환환
+        return f"{self.variant_code}({self.option})"
