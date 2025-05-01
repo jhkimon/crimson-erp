@@ -17,7 +17,7 @@ class InventoryItem(models.Model):
 
 class ProductVariant(models.Model):
     product = models.ForeignKey(
-        InventoryItem, on_delete=models.CASCADE, related_name="variatns")
+        InventoryItem, on_delete=models.CASCADE, related_name="variants")
     variant_code = models.CharField(max_length=50, unique=True)
     option = models.CharField(max_length=255)
     stock = models.PositiveIntegerField()

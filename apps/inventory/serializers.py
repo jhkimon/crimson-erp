@@ -50,3 +50,15 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         if product:
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
+
+class ProductVariantCRUDSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductVariant
+        fields = ['variant_code', 'option', 'stock', 'price']
+
+class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
+    variants = ProductVariantSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InventoryItem
+        fields = ['id', 'product_code', 'name', 'created_at', 'variants']

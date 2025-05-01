@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import InventoryItem, ProductVariant
-from .serializers import InventoryItemSerializer, ProductVariantSerializer
+from .serializers import InventoryItemSerializer, ProductVariantSerializer, ProductVariantCRUDSerializer, InventoryItemWithVariantsSerializer
 
 # 재고 전체 목록 작업 (조회 및 추가)
 
@@ -56,22 +56,23 @@ class InventoryItemView(APIView):
 
     # 상품 기본 정보 조회
     @swagger_auto_schema(
-        operation_summary="특정 상품 기본 정보 조회",
-        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품의 기본 정보를 조회합니다",
+        operation_summary="특정 상품 기본 정보 및 상세 목록 조회",
+        operation_description="product_id에 해당하는 상품의 기본 정보와 연결된 상세 상품 목록까지 함께 조회합니다.",
         manual_parameters=[openapi.Parameter(
             name="product_id",
             in_=openapi.IN_PATH,
             description="조회할 상품의 product_id",
             type=openapi.TYPE_INTEGER
         )],
-        responses={200: InventoryItemSerializer, 404: "Not Found"})
+        responses={200: InventoryItemWithVariantsSerializer, 404: "Not Found"}
+    )
     def get(self, request, product_id: int):
         try:
             item = InventoryItem.objects.get(id=product_id)
         except InventoryItem.DoesNotExist:
             return Response({"error": "기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = InventoryItemSerializer(item)
+        serializer = InventoryItemWithVariantsSerializer(item)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     # 상품 기본 정보 수정
@@ -133,21 +134,11 @@ class ProductVariantCreateView(APIView):
     """
     permission_classes = [AllowAny]
     # 상품 상세 정보 추가
-
     @swagger_auto_schema(
         operation_summary="특정 상품에 새로운 상세 정보 추가",
-        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품의 상세 정보를 생성합니다.",
-        manual_parameters=[
-            openapi.Parameter(
-                name="product_id",
-                in_=openapi.IN_PATH,
-                description="상세 정보를 추가할 상품의 product_id",
-                type=openapi.TYPE_INTEGER
-            )
-        ],
-        request_body=ProductVariantSerializer,
-        responses={201: ProductVariantSerializer,
-                   400: "Bad Request", 404: "Not Found"}
+        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품에 상세 정보를 생성합니다.",
+        request_body=ProductVariantCRUDSerializer,
+        responses={201: ProductVariantSerializer, 400: "Bad Request"}
     )
     def post(self, request, product_id: int):
         try:
@@ -155,11 +146,12 @@ class ProductVariantCreateView(APIView):
         except InventoryItem.DoesNotExist:
             return Response({"error": "상품 기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ProductVariantSerializer(
-            data=request.data, context={'request': request, 'product': product})
+        serializer = ProductVariantCRUDSerializer(
+            data=request.data, context={'request': request}
+        )
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            serializer.save(product=product)
+            return Response(ProductVariantSerializer(serializer.instance).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -174,42 +166,31 @@ class ProductVariantDetailView(APIView):
 
     # 제품 상세 정보 조회
 
-    @swagger_auto_schema(operation_summary="특정 상품의 상세 정보 조회",
-                         operation_description="URL 파라미터로 전달된 variant_id에 해당하는 특정 상품의 상세 정보를 조회합니다.",
-                         manual_parameters=[openapi.Parameter(
-                             name="product_id",
-                             in_=openapi.IN_PATH,
-                             description="조회할 상품의 product_id",
-                             type=openapi.TYPE_INTEGER
-                         ),
-                             openapi.Parameter(
-                                 name="variant_id",
-                                 in_=openapi.IN_PATH,
-                                 description="조회할 상품의 variant_id",
-                                 type=openapi.TYPE_INTEGER
-                         )
-                         ],
-                         responses={200: ProductVariantSerializer, 404: "Not Found"})
-    def get(self, request, product_id: int, variant_id: int):
+    @swagger_auto_schema(
+        operation_summary="특정 상품 기본 정보 및 상세 목록 조회",
+        operation_description="product_id에 해당하는 상품의 기본 정보와 연결된 상세 상품 목록까지 함께 조회합니다.",
+        manual_parameters=[openapi.Parameter(
+            name="product_id",
+            in_=openapi.IN_PATH,
+            description="조회할 상품의 product_id",
+            type=openapi.TYPE_INTEGER
+        )],
+        responses={200: InventoryItemWithVariantsSerializer, 404: "Not Found"}
+    )
+    def get(self, request, product_id: int):
         try:
-            variant = ProductVariant.objects.get(
-                id=variant_id, product_id=product_id)
-        except ProductVariant.DoesNotExist:
-            return Response({"error": "상세 정보가 존재하지 않습니다"}, status=status.HTTP_404_NOT_FOUND)
+            item = InventoryItem.objects.get(id=product_id)
+        except InventoryItem.DoesNotExist:
+            return Response({"error": "기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ProductVariantSerializer(variant)
+        serializer = InventoryItemWithVariantsSerializer(item)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     # 제품 상세 정보 수정
     @swagger_auto_schema(
         operation_summary="특정 상품의 상세 정보 수정",
         operation_description="URL 파라미터로 전달된 variant_id에 해당하는 특정 상품의 상세 정보를 수정합니다.",
-        manual_parameters=[openapi.Parameter(
-            name="product_id",
-            in_=openapi.IN_PATH,
-            description="조회할 상품의 product_id",
-            type=openapi.TYPE_INTEGER
-        ),
+        manual_parameters=[
             openapi.Parameter(
                 name="variant_id",
                 in_=openapi.IN_PATH,
@@ -217,7 +198,7 @@ class ProductVariantDetailView(APIView):
                 type=openapi.TYPE_INTEGER
         )
         ],
-        request_body=ProductVariantSerializer,
+        request_body=ProductVariantCRUDSerializer,
         responses={200: ProductVariantSerializer,
                    400: "Bad Request", 404: "Not Found"}
     )
@@ -228,8 +209,11 @@ class ProductVariantDetailView(APIView):
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다"}, status=status.HTTP_404_NOT_FOUND)
 
+        mutable_data = request.data.copy()
+        mutable_data.pop("product_id", None)
+
         serializer = ProductVariantSerializer(
-            variant, data=request.data, context={'request': request})
+            variant, data=mutable_data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
