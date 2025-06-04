@@ -1,7 +1,8 @@
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from rest_framework.serializers import ModelSerializer
 from django.contrib.auth.hashers import make_password
 
+User = get_user_model()
 # User Serializer for Signup
 class RegisterSerializer(ModelSerializer):
     class Meta:
