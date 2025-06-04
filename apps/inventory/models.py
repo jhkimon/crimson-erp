@@ -11,7 +11,7 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         # 호출 시 '상품코드 - 상품명' 형태로 반환
-        return f"{self.product_code} - {self.name}"
+        return f"{self.product_id} - {self.name}"
 
 
 class ProductVariant(models.Model):

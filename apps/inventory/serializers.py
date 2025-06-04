@@ -61,4 +61,4 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = InventoryItem
-        fields = ['id', 'product_code', 'name', 'created_at', 'variants']
+        fields = ['id', 'product_id', 'name', 'created_at', 'variants']
