@@ -50,6 +50,8 @@ INSTALLED_APPS = [
     "apps.orders",
 ]
 
+AUTH_USER_MODEL = 'hr.Employee'
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT만 사용

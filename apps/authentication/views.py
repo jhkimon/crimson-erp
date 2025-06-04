@@ -1,4 +1,4 @@
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,8 +11,8 @@ from apps.authentication.serializers import RegisterSerializer
 # 문서화
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
-
+         
+User = get_user_model()
 # 🔹 Signup API
 class SignupView(APIView):
     permission_classes = [AllowAny]  # 누구나 접근 가능
@@ -45,8 +45,8 @@ class SignupView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
-            refresh = RefreshToken.for_user(user)  # ✅ JWT만 발급 (Token 제거)
+            User = serializer.save()    
+            refresh = RefreshToken.for_user(User)  # ✅ JWT만 발급 (Token 제거)
             return Response(
                 {
                     "message": "Signup successful",
