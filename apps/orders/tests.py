@@ -6,23 +6,20 @@ from apps.orders.models import Order
 
 class OrderAPITestCase(APITestCase):
     def setUp(self):
-        # ✅ 1. 테스트 유저 생성
         self.user = get_user_model().objects.create_user(
             username='testuser',
             password='testpass123'
         )
 
-        # ✅ 2. JWT 토큰 발급 및 인증 헤더 설정
         refresh = RefreshToken.for_user(self.user)
         self.access_token = str(refresh.access_token)
         self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + self.access_token)
 
-        # ✅ 3. 테스트 주문 하나 생성
         self.order = Order.objects.create(
             variant_id="v001",
             supplier_id=1,
             quantity=5,
-            status="pending"
+            status="PENDING"
         )
 
         self.list_url = "/api/v1/orders/"
@@ -39,7 +36,7 @@ class OrderAPITestCase(APITestCase):
             "variant_id": "v002",
             "supplier_id": 2,
             "quantity": 10,
-            "status": "confirmed"
+            "status": "APPROVED"
         }
         response = self.client.post(self.list_url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -56,9 +53,9 @@ class OrderAPITestCase(APITestCase):
         self.assertFalse(Order.objects.filter(id=self.order.id).exists())
 
     def test_patch_order_status(self):
-        data = {"status": "shipped", "quantity": 15}
+        data = {"status": "PENDING", "quantity": 15}
         response = self.client.patch(self.status_url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.order.refresh_from_db()
-        self.assertEqual(self.order.status, "shipped")
+        self.assertEqual(self.order.status, "PENDING")
         self.assertEqual(self.order.quantity, 15)

@@ -96,5 +96,5 @@ class EmployeeDetailUpdateView(APIView):
         employee.status = 'inactive'
         employee.save()
         
-        serializer = EmployeeDeactivateSerializer(employee)
+        serializer = EmployeeDeactivateSerializer(employee, partial=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

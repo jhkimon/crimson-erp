@@ -6,17 +6,14 @@ from apps.inventory.models import InventoryItem, ProductVariant
 
 class InventoryAPITestCase(APITestCase):
     def setUp(self):
-        # ✅ 테스트 유저 생성
         self.user = get_user_model().objects.create_user(
             username="tester",
             password="testpass123"
         )
 
-        # ✅ JWT 토큰 생성 및 인증 설정
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        # ✅ 샘플 데이터 생성
         self.item = InventoryItem.objects.create(
             product_id="P001", name="Test Item"
         )
