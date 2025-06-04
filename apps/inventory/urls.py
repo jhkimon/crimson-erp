@@ -3,13 +3,11 @@ from .views import InventoryListView, ProductVariantDetailView, InventoryItemVie
 
 urlpatterns = [
     path("items/", InventoryListView.as_view(),
-         name="inventory-list"),  # /api/v1/inventory/items/
+         name="inventory-list"), 
     path("items/<int:product_id>/", InventoryItemView.as_view(),
-         name="inventoryitem-detail"),  # api/v1/inventory/items/{product_id}
+         name="inventoryitem-detail"), 
     path("items/<int:product_id>/variants/", ProductVariantCreateView.as_view(),
-         # api/v1/inventory/items/{product_id}/variants)
          name='productvariant-create'),
     path("items/<int:product_id>/variants/<int:variant_id>/", ProductVariantDetailView.as_view(),
-         # / api/v1/inventory/items/{product_id}/variants/{variant_id}
          name="productvariant-detail"),
 ]
