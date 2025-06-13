@@ -144,30 +144,30 @@ def create_product_variants(inventory_items):
 
 
 def create_orders(product_variants):
-    """주문 데이터 생성 (레퍼런스의 orders 참고)"""
+    """주문 데이터 생성"""
     print_status("주문 데이터 생성 중...", "📋")
-    
+
     if not product_variants:
-        print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "   ⚠️")
+        print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "⚠️")
         return []
 
     orders = []
-    
-    for i in range(20):  # 20개 주문 생성
+
+    for i in range(20):
         variant = random.choice(product_variants)
-        
+
         order = Order.objects.create(
-            variant_id=variant.variant_code,
-            supplier_id=random.randint(1, 10),  # 공급업체 ID (1-10)
+            variant=variant,  # 🔥 바뀐 포인트!
+            supplier_id=random.randint(1, 10),
             quantity=random.randint(1, 50),
             status=random.choice(ORDER_STATUSES),
-            order_date=timezone.now() - timedelta(days=random.randint(0, 30))
+            order_date=timezone.now() - timedelta(days=random.randint(0, 30)),
+            note=random.choice(["긴급 요청", "기본 주문", "", None])  # note 필드 예시로도 추가 가능
         )
         orders.append(order)
 
-    print_status(f"주문 데이터 생성 완료: {len(orders)}개", "   ✓")
+    print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
     return orders
-
 
 def display_summary():
     """생성된 데이터 요약 표시 (레퍼런스 스타일)"""

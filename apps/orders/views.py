@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .models import Order
-from .serializers import OrderSerializer
+from .serializers import OrderSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -11,11 +11,11 @@ class OrderListView(APIView):
     @swagger_auto_schema(
         operation_summary="전체 주문 보기",
         operation_description="Get a list of all orders in the system.",
-        responses={200: OrderSerializer(many=True)}
+        responses={200: OrderCompactSerializer(many=True)}
     )
     def get(self, request):
         orders = Order.objects.all()
-        serializer = OrderSerializer(orders, many=True)
+        serializer = OrderCompactSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(

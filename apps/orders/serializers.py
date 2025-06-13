@@ -1,36 +1,51 @@
-# apps/orders/serializers.py
 from rest_framework import serializers
-from .models import Order
-from apps.inventory.models import InventoryItem
-from apps.inventory.serializers import InventoryItemSerializer
+from apps.orders.models import Order
 from apps.inventory.models import ProductVariant
+from apps.inventory.serializers import ProductVariantSerializer
 
 class OrderSerializer(serializers.ModelSerializer):
-    variant = serializers.SerializerMethodField()
+    variant_id = serializers.SlugRelatedField(
+        slug_field='variant_code',
+        queryset=ProductVariant.objects.all(),
+        source='variant'
+    )
+    variant = ProductVariantSerializer(read_only=True)
 
     class Meta:
         model = Order
         fields = [
             'id',
             'variant_id',
-            'variant',
+            'variant', 
             'supplier_id',
             'quantity',
             'status',
+            'note',       
             'order_date'
         ]
         read_only_fields = ['id', 'order_date']
 
-    def get_variant(self, obj):
-        try:
-            # 1. variant_code로 ProductVariant 찾기
-            variant = ProductVariant.objects.get(variant_code=obj.variant_id)
-            
-            # 2. 그 안에 연결된 InventoryItem (variant.product)
-            item = variant.product
 
-            # 3. InventoryItem 직렬화해서 반환
-            return InventoryItemSerializer(item).data
+class OrderCompactSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+    variant_code = serializers.CharField(source='variant.variant_code')
+    option = serializers.CharField(source='variant.option')
+    price = serializers.IntegerField(source='variant.price')
 
-        except ProductVariant.DoesNotExist:
-            return None
+    class Meta:
+        model = Order
+        fields = [
+            'id',
+            'variant_code',
+            'product_name',
+            'option',
+            'price',
+            'supplier_id',
+            'quantity',
+            'status',
+            'note',
+            'order_date',
+        ]
+
+    def get_product_name(self, obj):
+        return obj.variant.product.name

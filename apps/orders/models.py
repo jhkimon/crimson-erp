@@ -1,4 +1,5 @@
 from django.db import models
+from apps.inventory.models import ProductVariant
 
 class Order(models.Model):
     STATUS_PENDING = 'PENDING'
@@ -12,7 +13,13 @@ class Order(models.Model):
     ]
 
     id = models.AutoField(primary_key=True)
-    variant_id = models.CharField(max_length=255)
+    variant = models.ForeignKey(
+        ProductVariant,
+        to_field='variant_code',
+        db_column='variant_id',
+        on_delete=models.CASCADE,
+        null=True
+    )
     supplier_id = models.IntegerField()
     quantity = models.IntegerField()
     status = models.CharField(
@@ -21,6 +28,7 @@ class Order(models.Model):
         default=STATUS_PENDING
     )
     order_date = models.DateTimeField(auto_now_add=True)
+    note = models.TextField(blank=True, null=True)
 
     class Meta:
         db_table = 'orders'
