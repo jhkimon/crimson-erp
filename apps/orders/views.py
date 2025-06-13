@@ -54,7 +54,7 @@ class OrderDetailView(APIView):
             )
         ],
         responses={
-            200: OrderSerializer,
+            200: OrderCompactSerializer,
             404: openapi.Response(description="Order not found")
         }
     )
@@ -62,7 +62,7 @@ class OrderDetailView(APIView):
         order = self.get_object(order_id)
         if not order:
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = OrderSerializer(order)
+        serializer = OrderCompactSerializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
