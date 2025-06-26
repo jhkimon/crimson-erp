@@ -10,7 +10,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 
-    inventory_item = InventoryItemSerializer(source='product', read_only=True)
+    # inventory_item = InventoryItemSerializer(source='product', read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
         queryset=InventoryItem.objects.all(),
         source='product',
@@ -21,7 +21,6 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         model = ProductVariant
         fields = [
             'id',                   # variant_id
-            'inventory_item',       # 품목명 및 품목코드
             'product_id',    # product_id
             'variant_code',         # variant_code
             'option',               # 옵션

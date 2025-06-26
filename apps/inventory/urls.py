@@ -4,10 +4,10 @@ from .views import InventoryListView, ProductVariantDetailView, InventoryItemVie
 urlpatterns = [
     path("items/", InventoryListView.as_view(),
          name="inventory-list"), 
-    path("items/<int:product_id>/", InventoryItemView.as_view(),
+    path("items/<str:product_id>/", InventoryItemView.as_view(),
          name="inventoryitem-detail"), 
-    path("items/<int:product_id>/variants/", ProductVariantCreateView.as_view(),
+    path("items/<str:product_id>/variants/", ProductVariantCreateView.as_view(),
          name='productvariant-create'),
-    path("items/<int:product_id>/variants/<int:variant_id>/", ProductVariantDetailView.as_view(),
+    path("items/variants/<str:variant_id>/", ProductVariantDetailView.as_view(),
          name="productvariant-detail"),
 ]
