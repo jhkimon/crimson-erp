@@ -6,7 +6,7 @@ urlpatterns = [
          name="inventory-list"), 
     path("items/<str:product_id>/", InventoryItemView.as_view(),
          name="inventoryitem-detail"), 
-    path("items/<str:product_id>/variants/", ProductVariantCreateView.as_view(),
+    path("items/variants/<str:product_id>/", ProductVariantCreateView.as_view(),
          name='productvariant-create'),
     path("items/variants/<str:variant_id>/", ProductVariantDetailView.as_view(),
          name="productvariant-detail"),

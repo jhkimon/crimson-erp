@@ -20,7 +20,7 @@ class InventoryListView(APIView):
     # 전체 목록 조회
 
     @swagger_auto_schema(
-        operation_summary="전체 제품 목록 조회",
+        operation_summary="전체 제품 목록 조회 (갤럭시 S24 Ultra)",
         operation_description="현재 등록된 모든 제품 목록을 조회합니다.",
         responses={200: InventoryItemWithVariantsSerializer(many=True)}
     )
@@ -28,20 +28,6 @@ class InventoryListView(APIView):
         items = InventoryItem.objects.all()
         serializer = InventoryItemWithVariantsSerializer(items, many=True)
         return Response(serializer.data)
-
-    # 신규 상품 추가
-    @swagger_auto_schema(
-        operation_summary="새로운 제품 추가",
-        operation_description="새로운 제품을 등록합니다.",
-        request_body=InventoryItemSerializer,
-        responses={201: InventoryItemSerializer}
-    )
-    def post(self, request):
-        serializer = InventoryItemSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # 개별 제품 관련 작업 (조회/수정/삭제)
 
@@ -56,7 +42,7 @@ class InventoryItemView(APIView):
 
     # 상품 기본 정보 조회
     @swagger_auto_schema(
-        operation_summary="특정 상품 기본 정보 및 상세 목록 조회",
+        operation_summary="특정 상품 상세 정보 조회 (갤럭시 S24 Ultra)",
         operation_description="product_id에 해당하는 상품의 기본 정보와 연결된 상세 상품 목록까지 함께 조회합니다.",
         manual_parameters=[openapi.Parameter(
             name="product_id",
@@ -77,7 +63,7 @@ class InventoryItemView(APIView):
 
     # 상품 기본 정보 수정
     @swagger_auto_schema(
-        operation_summary="특정 상품 기본 정보 수정",
+        operation_summary="특정 상품 기본 정보 수정 (갤럭시 S24 Ultra)",
         operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품의 기본 정보를 수정합니다.",
         manual_parameters=[
             openapi.Parameter(
@@ -104,7 +90,7 @@ class InventoryItemView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
-        operation_summary="특정 상품 삭제",
+        operation_summary="특정 상품 삭제 (갤럭시 S24 Ultra)",
         operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품을 삭제합니다.",
         manual_parameters=[
             openapi.Parameter(
@@ -133,7 +119,7 @@ class ProductVariantCreateView(APIView):
     permission_classes = [AllowAny]
     # 상품 상세 정보 추가
     @swagger_auto_schema(
-        operation_summary="특정 상품에 새로운 상세 정보 추가",
+        operation_summary="특정 상품에 새로운 상세 정보 추가 (갤럭시 S24 Ultra, 그린)",
         operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품에 상세 정보를 생성합니다.",
         request_body=ProductVariantCRUDSerializer,
         responses={201: ProductVariantSerializer, 400: "Bad Request"}
@@ -162,7 +148,7 @@ class ProductVariantDetailView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_summary="특정 세부 품목 정보 조회",
+        operation_summary="특정 세부 품목 정보 조회 (갤럭시 S24 Ultra, 그린)",
         operation_description="variant_code를 통해 해당 세부 품목 정보를 조회합니다.",
         manual_parameters=[
             openapi.Parameter(
@@ -184,7 +170,7 @@ class ProductVariantDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
-        operation_summary="특정 상품의 상세 정보 수정",
+        operation_summary="특정 상품의 상세 정보 수정 (갤럭시 S24 Ultra, 그린)",
         operation_description="variant_code를 통해 해당 세부 품목 정보를 수정합니다.",
         manual_parameters=[
             openapi.Parameter(
@@ -210,7 +196,7 @@ class ProductVariantDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
-        operation_summary="특정 상품의 상세 정보 삭제",
+        operation_summary="특정 상품의 상세 정보 삭제 (갤럭시 S24 Ultra, 그린)",
         operation_description="variant_code를 통해 해당 세부 품목 정보를 삭제합니다.",
         manual_parameters=[
             openapi.Parameter(
