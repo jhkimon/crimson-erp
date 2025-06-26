@@ -51,6 +51,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
 
+
+
+
 class ProductVariantCRUDSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant

@@ -22,11 +22,11 @@ class InventoryListView(APIView):
     @swagger_auto_schema(
         operation_summary="전체 제품 목록 조회",
         operation_description="현재 등록된 모든 제품 목록을 조회합니다.",
-        responses={200: InventoryItemSerializer(many=True)}
+        responses={200: InventoryItemWithVariantsSerializer(many=True)}
     )
     def get(self, request):
         items = InventoryItem.objects.all()
-        serializer = InventoryItemSerializer(items, many=True)
+        serializer = InventoryItemWithVariantsSerializer(items, many=True)
         return Response(serializer.data)
 
     # 신규 상품 추가
