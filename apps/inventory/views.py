@@ -5,11 +5,9 @@ from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import InventoryItem, ProductVariant
-from .serializers import InventoryItemSerializer, ProductVariantSerializer, ProductVariantCRUDSerializer, InventoryItemWithVariantsSerializer
+from .serializers import ProductVariantSerializer, ProductVariantCRUDSerializer, InventoryItemWithVariantsSerializer
 
-# 재고 전체 목록 작업 (조회 및 추가)
-
-
+# 재고 전체 조회
 class InventoryListView(APIView):
     """
     GET: 전체 제품 목록 조회
@@ -29,14 +27,11 @@ class InventoryListView(APIView):
         serializer = InventoryItemWithVariantsSerializer(items, many=True)
         return Response(serializer.data)
 
-# 개별 제품 관련 작업 (조회/수정/삭제)
 
-
+# 일부 조회
 class InventoryItemView(APIView):
     '''
     GET: 특정 상품 기본 정보 조회 (상품코드, 상품명, 생성일자)
-    PUT: 상품 기본 정보 수정
-    DELETE: 상품 삭제
     '''
     permission_classes = [AllowAny]
 
@@ -61,91 +56,52 @@ class InventoryItemView(APIView):
         serializer = InventoryItemWithVariantsSerializer(item)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # 상품 기본 정보 수정
-    @swagger_auto_schema(
-        operation_summary="특정 상품 기본 정보 수정 (갤럭시 S24 Ultra)",
-        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품의 기본 정보를 수정합니다.",
-        manual_parameters=[
-            openapi.Parameter(
-                name="product_id",
-                in_=openapi.IN_PATH,
-                description="수정할 상품의 product_id",
-                type=openapi.TYPE_STRING
-            )
-        ],
-        request_body=InventoryItemSerializer,
-        responses={200: InventoryItemSerializer,
-                   400: "Bad Request", 404: "Not Found"}
-    )
-    def put(self, request, product_id: str):
-        try:
-            item = InventoryItem.objects.get(product_id=product_id)
-        except InventoryItem.DoesNotExist:
-            return Response({"error": "기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = InventoryItemSerializer(item, data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @swagger_auto_schema(
-        operation_summary="특정 상품 삭제 (갤럭시 S24 Ultra)",
-        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품을 삭제합니다.",
-        manual_parameters=[
-            openapi.Parameter(
-                name="product_id",
-                in_=openapi.IN_PATH,
-                description="삭제할 상품의 product_id",
-                type=openapi.TYPE_STRING
-            )
-        ],
-        responses={204: "삭제 완료: Successfully Deleted", 404: "Not Found"}
-    )
-    def delete(self, request, product_id: str):
-        try:
-            item = InventoryItem.objects.get(product_id=product_id)
-        except InventoryItem.DoesNotExist:
-            return Response({"error": "기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
-
-        item.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 # 상품 상세 정보 CRUD
-class ProductVariantCreateView(APIView):
+class ProductVariantDetailView(APIView):
     """
-    POST: 특정 상품의 상세 정보 생성
+    POST: 특정 상품의 상세 정보 생성 (variant_code)
+    GET: 특정 상품의 상세 정보 조회 (variant_code)
+    PUT: 특정 상품의 상세 정보 수정 (variant_code)
+    DELETE: 특정 상품의 상세 정보 삭제 (variant_code)
     """
+
     permission_classes = [AllowAny]
-    # 상품 상세 정보 추가
+
     @swagger_auto_schema(
-        operation_summary="특정 상품에 새로운 상세 정보 추가 (갤럭시 S24 Ultra, 그린)",
-        operation_description="URL 파라미터로 전달된 product_id에 해당하는 상품에 상세 정보를 생성합니다.",
+        operation_summary="특정 상품의 상세 정보 생성 (갤럭시 S24 Ultra, 그린)",
+        operation_description="variant_code를 통해 새로운 상세 정보를 생성합니다.",
         request_body=ProductVariantCRUDSerializer,
+        manual_parameters=[
+            openapi.Parameter(
+                name="variant_id",
+                in_=openapi.IN_PATH,
+                description="생성할 variant_code (ex: P1001-01)",
+                type=openapi.TYPE_STRING
+            )
+        ],
         responses={201: ProductVariantSerializer, 400: "Bad Request"}
     )
-    def post(self, request, product_id: str):
+    def post(self, request, variant_id: str):
+        # variant_code가 중복되면 400 반환
+        if ProductVariant.objects.filter(variant_code=variant_id).exists():
+            return Response({"error": "이미 존재하는 variant_code 입니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_id = request.data.get('product_id')
+        if not product_id:
+            return Response({"error": "product_id가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             product = InventoryItem.objects.get(product_id=product_id)
         except InventoryItem.DoesNotExist:
             return Response({"error": "상품 기본 정보가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ProductVariantCRUDSerializer(
-            data=request.data, context={'request': request}
-        )
+        serializer = ProductVariantCRUDSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save(product=product)
+            serializer.save(product=product, variant_code=variant_id)
             return Response(ProductVariantSerializer(serializer.instance).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ProductVariantDetailView(APIView):
-    """
-    GET: 특정 상품의 상세 정보 조회 (상세코드, 옵션, 재고량, 가격, 생성일자, 수정일자)
-    PUT: 특정 상품 상세 정보 수정
-    DELETE: 특정 상품 상세 정보 삭제
-    """
-    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_summary="특정 세부 품목 정보 조회 (갤럭시 S24 Ultra, 그린)",
@@ -154,7 +110,7 @@ class ProductVariantDetailView(APIView):
             openapi.Parameter(
                 name="variant_id",
                 in_=openapi.IN_PATH,
-                description="조회할 variant_code",
+                description="조회할 variant_code (ex: P1001-01)",
                 type=openapi.TYPE_STRING
             )
         ],
@@ -176,7 +132,7 @@ class ProductVariantDetailView(APIView):
             openapi.Parameter(
                 name="variant_id",
                 in_=openapi.IN_PATH,
-                description="수정할 variant_code",
+                description="수정할 variant_code (ex: P1001-01)",
                 type=openapi.TYPE_STRING
             )
         ],
@@ -202,7 +158,7 @@ class ProductVariantDetailView(APIView):
             openapi.Parameter(
                 name="variant_id",
                 in_=openapi.IN_PATH,
-                description="삭제할 variant_code",
+                description="삭제할 variant_code (ex: P1001-01)",
                 type=openapi.TYPE_STRING
             )
         ],
