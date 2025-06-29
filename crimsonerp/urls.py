@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path, include  # ✅ path와 include를 import 추가
+from django.urls import path, include
 from django.http import JsonResponse
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
@@ -18,7 +18,6 @@ schema_view = get_schema_view(
     permission_classes=[AllowAny],
 )
 
-# ✅ Swagger에서 JWT 인증 추가
 schema_view = get_schema_view(
     openapi.Info(
         title="CrimsonERP API",

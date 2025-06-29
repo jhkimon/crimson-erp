@@ -21,6 +21,7 @@ django.setup()
 # Django 모델 import (django.setup() 이후에 해야 함)
 from apps.hr.models import Employee
 from apps.inventory.models import InventoryItem, ProductVariant
+from apps.supplier.models import Supplier, SupplierVariant
 from apps.orders.models import Order
 from django.utils import timezone
 
@@ -35,6 +36,13 @@ EMPLOYEES_DATA = [
 PRODUCTS_DATA = [
     "갤럭시 S24 Ultra", "iPhone 15 Pro", "MacBook Pro 16인치", "iPad Air",
     "Dell XPS 13", "LG 27인치 모니터", "Sony WH-1000XM5", "AirPods Pro 2세대"
+]
+
+SUPPLIERS_DATA = [
+    ("대한유통", "010-6675-7797", "박한솔", "hspark_factcorp@kakao.com", "서울특별시 성북구 안암로145"),
+    ("삼성상사", "010-1234-5678", "김진수", "samsung@corp.com", "서울특별시 강남구 테헤란로 311"),
+    ("LG트레이딩", "010-8888-9999", "이현주", "lgtrade@lg.com", "서울특별시 마포구 월드컵북로 396"),
+    ("넥스트물류", "010-2222-3333", "정민호", "nextlogi@next.com", "경기도 성남시 판교로 242"),
 ]
 
 COLORS = ["블랙", "화이트", "실버", "골드", "블루", "레드", "그린", "퍼플"]
@@ -169,6 +177,33 @@ def create_orders(product_variants):
     print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
     return orders
 
+def create_suppliers(product_variants):
+    """공급업체 및 variant 매핑 생성"""
+    print_status("공급업체 데이터 생성 중...", "🏢")
+
+    suppliers = []
+    for name, contact, manager, email, address in SUPPLIERS_DATA:
+        supplier, created = Supplier.objects.get_or_create(
+            name=name,
+            defaults={
+                "contact": contact,
+                "manager": manager,
+                "email": email,
+                "address": address,
+            }
+        )
+        suppliers.append(supplier)
+        print_status(f"공급업체 생성: {name}", "   ✓" if created else "   •")
+
+        # 각 supplier에 3~5개의 variant 무작위로 연결
+        num_variants = random.randint(3, 5)
+        selected_variants = random.sample(product_variants, num_variants)
+        for variant in selected_variants:
+            SupplierVariant.objects.get_or_create(supplier=supplier, variant=variant)
+
+    print_status(f"총 {len(suppliers)}개의 공급업체 등록 완료", "✓")
+    return suppliers
+
 def display_summary():
     """생성된 데이터 요약 표시 (레퍼런스 스타일)"""
     print("\n" + "="*50)
@@ -177,6 +212,7 @@ def display_summary():
     print(f"   📦 상품: {InventoryItem.objects.count()}개")
     print(f"   🎨 상품옵션: {ProductVariant.objects.count()}개") 
     print(f"   📋 주문: {Order.objects.count()}개")
+    print(f"   🏢 공급업체: {Supplier.objects.count()}개")
     
     print("\n🔑 테스트 계정 정보:")
     print("   - admin / crimson123 (관리자)")
@@ -189,6 +225,7 @@ def display_summary():
     print("\n📖 API 문서:")
     print("   http://localhost:8000/swagger/")
     print("="*50)
+
 
 
 def main():
@@ -216,6 +253,7 @@ def main():
         inventory_items = create_inventory_items()
         product_variants = create_product_variants(inventory_items)
         orders = create_orders(product_variants)
+        suppliers = create_suppliers(product_variants)
         
         print_status("더미데이터 생성이 완료되었습니다!", "✅")
         display_summary()
@@ -223,7 +261,6 @@ def main():
     except Exception as e:
         print_status(f"더미데이터 생성 중 오류가 발생했습니다: {str(e)}", "❌")
         raise
-
 
 if __name__ == "__main__":
     main() 
