@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import InventoryItem, ProductVariant
+from apps.supplier.models import SupplierVariant
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
@@ -10,57 +11,155 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 
-    # inventory_item = InventoryItemSerializer(source='product', read_only=True)
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=InventoryItem.objects.all(),
-        source='product',
-        write_only=True
-    )
+    suppliers = serializers.SerializerMethodField()
+    cost_price = serializers.SerializerMethodField()
+    product_id = serializers.CharField(source='product.product_id', read_only=True)
 
     class Meta:
         model = ProductVariant
         fields = [
-            'id',                   # variant_id
             'product_id',    # product_id
             'variant_code',         # variant_code
             'option',               # 옵션
             'stock',                # 재고량
             'price',                # 가격
-            'created_at',           # 생성일시
-            'updated_at'            # 수정일시
+            'min_stock',             # 최소재고
+            'description',          # 상품설명
+            'memo',                  # 메모
+            'cost_price',           # 원가
+            'order_count',          # 판매수량
+            'return_count',          # 환불수량
+            'suppliers'             # 공급자명
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-    # 수정 시 기본 정보(inventory_item)는 가져오지 않기
 
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get('request')
-        # POST, PUT, PATCH 요청 시에는 기본 정보 필드 입력 제거거
+        # POST, PUT, PATCH 요청 시에는 기본 정보 필드 입력 제거
         if request and request.method in ['POST', 'PUT', 'PATCH']:
             fields.pop('inventory_item', None)
             fields.pop('product_id', None)
         return fields
 
     def create(self, validated_data):
-        # POST 요청 시, 외래키(Product)는 get_fields()에서 제거되어 validated_data에 포함되어 있지 않습니다.
-        # 대신 뷰에서 전달한 context에서 InventoryItem 객체를 가져와 넣어줍니다.
         product = self.context.get('product')
         if product:
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
-
-
-
-
-class ProductVariantCRUDSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductVariant
-        fields = ['variant_code', 'option', 'stock', 'price']
-
+    def get_suppliers(self, obj):
+        # SupplierVariant와 연결된 정보들을 반환
+        variants = SupplierVariant.objects.select_related("supplier").filter(variant=obj)
+        return [
+            {
+                "name": sv.supplier.name,
+                "is_primary": sv.is_primary,
+            }
+            for sv in variants
+        ]
+    def get_cost_price(self, obj):
+        supplier_variants = SupplierVariant.objects.filter(variant=obj)
+        prices = [sv.cost_price for sv in supplier_variants if sv.cost_price is not None]
+        if not prices:
+            return None
+        return sum(prices) // len(prices)
+    
+    
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
     variants = ProductVariantSerializer(many=True, read_only=True)
 
     class Meta:
         model = InventoryItem
-        fields = ['id', 'product_id', 'name', 'created_at', 'variants']
+        fields = ['product_id', 'name', 'variants']
+
+
+
+###### Create Update Delete를 위한 Serializer
+class SupplierVariantUpdateSerializer(serializers.Serializer):
+    supplier_name = serializers.CharField()
+    cost_price = serializers.IntegerField()
+    is_primary = serializers.BooleanField()
+
+    def validate_supplier_name(self, value):
+        from apps.supplier.models import Supplier
+        try:
+            return Supplier.objects.get(name=value)
+        except Supplier.DoesNotExist:
+            raise serializers.ValidationError(f"공급자 '{value}'는 존재하지 않습니다.")
+
+class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
+    product_id = serializers.CharField(source="product.product_id")  # ← 추가
+    name = serializers.CharField(source="product.name")
+    suppliers = SupplierVariantUpdateSerializer(many=True, required=False)
+
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'product_id', 'variant_code', 'option', 'stock', 'price',
+            'min_stock', 'description', 'memo',
+            'name', 'suppliers'
+        ]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get('request')
+
+        # POST나 PATCH 요청 시 variant_code 제거
+        if request and request.method in ['POST', 'PATCH']:
+            fields.pop('variant_code', None)
+        return fields
+
+    def create(self, validated_data):
+        from apps.supplier.models import SupplierVariant
+
+        product = self.context.get('product')
+        validated_data.pop('product', None)
+
+        # suppliers 분리
+        suppliers_data = validated_data.pop('suppliers', [])
+
+        # variant 생성
+        variant = ProductVariant.objects.create(product=product, **validated_data)
+
+        # suppliers 연결
+        for s in suppliers_data:
+            SupplierVariant.objects.create(
+                variant=variant,
+                supplier=s['supplier_name'],
+                cost_price=s['cost_price'],
+                is_primary=s.get('is_primary', False),
+            )
+        return variant
+    
+    def update(self, instance, validated_data):
+        # Update ProductVariant fields
+        product_data = validated_data.pop('product', {})
+        if 'name' in product_data:
+            instance.product.name = product_data['name']
+            instance.product.save()
+
+        suppliers_data = validated_data.pop('suppliers', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update SupplierVariants (optional)
+        if suppliers_data is not None:
+            from apps.supplier.models import SupplierVariant, Supplier
+            # 기존 관계 제거
+            SupplierVariant.objects.filter(variant=instance).delete()
+
+            # 새로 추가
+            for s in suppliers_data:
+                SupplierVariant.objects.create(
+                    variant=instance,
+                    supplier=s['supplier_name'],
+                    cost_price=s['cost_price'],
+                    is_primary=s.get('is_primary', False),
+                )
+        return instance
+    
+# Swagger용
+class ProductVariantCreateSerializer(ProductVariantFullUpdateSerializer):
+    class Meta(ProductVariantFullUpdateSerializer.Meta):
+        fields = [f for f in ProductVariantFullUpdateSerializer.Meta.fields if f != 'variant_code']

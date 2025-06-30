@@ -123,33 +123,34 @@ def create_inventory_items():
 
 
 def create_product_variants(inventory_items):
-    """상품 옵션 생성 (레퍼런스의 product_variants 참고)"""
+    """상품 옵션 생성 (description, memo 포함)"""
     print_status("상품 옵션 생성 중...", "🎨")
-    
+
     product_variants = []
     for item in inventory_items:
-        # 각 상품마다 2-4개의 색상 옵션 생성
         num_variants = random.randint(2, 4)
         selected_colors = random.sample(COLORS, min(num_variants, len(COLORS)))
-        
+
         for i, color in enumerate(selected_colors, 1):
             variant_code = f"{item.product_id}-{i:02d}"
-            
+
             if not ProductVariant.objects.filter(variant_code=variant_code).exists():
                 variant = ProductVariant.objects.create(
                     product=item,
                     variant_code=variant_code,
                     option=color,
-                    stock=random.randint(10, 200),
-                    price=random.randint(50000, 3000000),  # 5만원~300만원
+                    stock=random.randint(10, 100),
+                    min_stock=random.randint(1, 30),
+                    price=random.randint(100000, 3000000),
+                    description=f"{item.name} - {color} 색상",
+                    memo=random.choice(["인기 상품", "창고 보유", "입고 예정", ""]),
                 )
                 product_variants.append(variant)
             else:
                 product_variants.append(ProductVariant.objects.get(variant_code=variant_code))
-    
+
     print_status(f"상품 옵션 생성 완료: {len(product_variants)}개", "   ✓")
     return product_variants
-
 
 def create_orders(product_variants):
     """주문 데이터 생성"""
@@ -178,7 +179,7 @@ def create_orders(product_variants):
     return orders
 
 def create_suppliers(product_variants):
-    """공급업체 및 variant 매핑 생성"""
+    """공급업체 및 SupplierVariant 연결"""
     print_status("공급업체 데이터 생성 중...", "🏢")
 
     suppliers = []
@@ -195,11 +196,18 @@ def create_suppliers(product_variants):
         suppliers.append(supplier)
         print_status(f"공급업체 생성: {name}", "   ✓" if created else "   •")
 
-        # 각 supplier에 3~5개의 variant 무작위로 연결
-        num_variants = random.randint(3, 5)
-        selected_variants = random.sample(product_variants, num_variants)
+        # 각 supplier에 3~5개의 variant 무작위 연결
+        selected_variants = random.sample(product_variants, random.randint(3, 5))
         for variant in selected_variants:
-            SupplierVariant.objects.get_or_create(supplier=supplier, variant=variant)
+            SupplierVariant.objects.get_or_create(
+                supplier=supplier,
+                variant=variant,
+                defaults={
+                    "cost_price": int(variant.price * random.uniform(0.6, 0.8)),
+                    "lead_time_days": random.randint(2, 10),
+                    "is_primary": random.choice([True, False])
+                }
+            )
 
     print_status(f"총 {len(suppliers)}개의 공급업체 등록 완료", "✓")
     return suppliers

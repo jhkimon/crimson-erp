@@ -27,6 +27,9 @@ class ProductVariant(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    order_count = models.PositiveIntegerField(default=0)
+    return_count = models.PositiveIntegerField(default=0)
+
     class Meta:
         db_table = "product_variants"
 

@@ -3,7 +3,7 @@ from apps.inventory.models import ProductVariant
 
 
 class Supplier(models.Model):
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, unique=True)
     contact = models.CharField(max_length=20)
     manager = models.CharField(max_length=50)
     email = models.EmailField()
