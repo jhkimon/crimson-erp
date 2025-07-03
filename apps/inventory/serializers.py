@@ -3,6 +3,11 @@ from .models import InventoryItem, ProductVariant
 from apps.supplier.models import SupplierVariant
 
 
+class ProductOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = ['id', 'product_id', 'name']
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem

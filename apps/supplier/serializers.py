@@ -3,12 +3,21 @@ from apps.supplier.models import Supplier, SupplierVariant
 from apps.inventory.models import ProductVariant
 
 
+# 빠른 검색용
+class SupplierOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = ['id', 'name', 'contact', 'manager', 'email', 'address']
+
+
+# Variant 필수 정보만 가져옴.
 class ProductVariantSimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
         fields = ['id', 'variant_code', 'option']
 
 
+# Supplier 전체
 class SupplierSerializer(serializers.ModelSerializer):
     # variant_codes는 입력용(write-only)
     variant_codes = serializers.ListField(

@@ -5,8 +5,23 @@ from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import InventoryItem, ProductVariant
-from .serializers import ProductVariantSerializer, ProductVariantFullUpdateSerializer, InventoryItemWithVariantsSerializer, ProductVariantCreateSerializer
+from .serializers import ProductOptionSerializer, ProductVariantSerializer, ProductVariantFullUpdateSerializer, InventoryItemWithVariantsSerializer, ProductVariantCreateSerializer
 
+
+# 빠른 값 조회용 엔드포인트
+class ProductOptionListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="상품 옵션 리스트 조회",
+        operation_description="상품 드롭다운용으로 product_id와 name만 간단히 반환합니다.",
+        responses={200: ProductOptionSerializer(many=True)}
+    )
+    def get(self, request):
+        products = InventoryItem.objects.all().only('product_id', 'name')
+        serializer = ProductOptionSerializer(products, many=True)
+        return Response(serializer.data)
+    
 # 재고 전체 조회
 class InventoryListView(APIView):
     """
