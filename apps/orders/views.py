@@ -1,13 +1,16 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
 from rest_framework import status
 from .models import Order
-from .serializers import OrderSerializer, OrderCompactSerializer
+from .serializers import OrderWriteSerializer, OrderReadSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 
 class OrderListView(APIView):
+    permission_classes = [AllowAny]
+
     @swagger_auto_schema(
         operation_summary="전체 주문 보기",
         operation_description="Get a list of all orders in the system.",
@@ -21,20 +24,21 @@ class OrderListView(APIView):
     @swagger_auto_schema(
         operation_summary="주문 생성하기",
         operation_description="Submit a new order with required fields.",
-        request_body=OrderSerializer,
-        responses={201: OrderSerializer}
+        request_body=OrderWriteSerializer,
+        responses={201: OrderReadSerializer}
     )
     def post(self, request, *args, **kwargs):
-        serializer = OrderSerializer(data=request.data)
+        serializer = OrderWriteSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        else:
-            print(serializer.errors)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+            order = serializer.save()
+            # 응답은 읽기용으로 직렬화
+            read_serializer = OrderReadSerializer(order)
+            return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class OrderDetailView(APIView):
+    permission_classes = [AllowAny]
+
     def get_object(self, order_id):
         try:
             return Order.objects.get(id=order_id)
@@ -44,43 +48,19 @@ class OrderDetailView(APIView):
     @swagger_auto_schema(
         operation_summary="주문 상세 보기",
         operation_description="Retrieve detailed information about a specific order.",
-        manual_parameters=[
-            openapi.Parameter(
-                'order_id',
-                openapi.IN_PATH,
-                description="ID of the order to retrieve",
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            200: OrderCompactSerializer,
-            404: openapi.Response(description="Order not found")
-        }
+        responses={200: OrderReadSerializer, 404: "Not Found"}
     )
     def get(self, request, order_id):
         order = self.get_object(order_id)
         if not order:
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = OrderCompactSerializer(order)
+        serializer = OrderReadSerializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_summary="주문 삭제하기",
         operation_description="Delete a specific order by its ID.",
-        manual_parameters=[
-            openapi.Parameter(
-                'order_id',
-                openapi.IN_PATH,
-                description="ID of the order to delete",
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
-        responses={
-            204: openapi.Response(description="Order deleted successfully"),
-            404: openapi.Response(description="Order not found")
-        }
+        responses={204: "No Content", 404: "Not Found"}
     )
     def delete(self, request, order_id):
         order = self.get_object(order_id)
@@ -89,65 +69,28 @@ class OrderDetailView(APIView):
         order.delete()
         return Response({"message": "Order deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
 
-
-class OrderStatusView(APIView):
-    def get_object(self, order_id):
-        try:
-            return Order.objects.get(id=order_id)
-        except Order.DoesNotExist:
-            return None
-
     @swagger_auto_schema(
         operation_summary="주문 상태 변경하기",
-        operation_description="Update the status (and optionally quantity) of an order.",
-        manual_parameters=[
-            openapi.Parameter(
-                'order_id',
-                openapi.IN_PATH,
-                description="ID of the order to update",
-                type=openapi.TYPE_INTEGER,
-                required=True
-            )
-        ],
+        operation_description="Update the status of a specific order.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=['status'],
             properties={
-                'status': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="New status for the order"
-                ),
-                'quantity': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description="New quantity for the order"
-                ),
+                'status': openapi.Schema(type=openapi.TYPE_STRING)
             }
         ),
-        responses={
-            200: OrderSerializer,
-            400: openapi.Response(description="Invalid input"),
-            404: openapi.Response(description="Order not found")
-        }
+        responses={200: OrderReadSerializer, 400: "Bad Request", 404: "Not Found"}
     )
     def patch(self, request, order_id):
-        try:
-            order_id = int(order_id)
-        except ValueError:
-            return Response({"error": "Order ID must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
-
         order = self.get_object(order_id)
         if not order:
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if 'status' in request.data:
-            order.status = request.data['status']
+        status_val = request.data.get('status')
+        if not status_val:
+            return Response({"error": "Missing 'status'"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if 'quantity' in request.data:
-            try:
-                order.quantity = int(request.data['quantity'])
-            except ValueError:
-                return Response({"error": "Quantity must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
-
+        order.status = status_val
         order.save()
-        serializer = OrderSerializer(order)
+        serializer = OrderReadSerializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)

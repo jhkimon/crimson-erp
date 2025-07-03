@@ -22,7 +22,8 @@ django.setup()
 from apps.hr.models import Employee
 from apps.inventory.models import InventoryItem, ProductVariant
 from apps.supplier.models import Supplier, SupplierVariant
-from apps.orders.models import Order
+from apps.orders.models import Order, OrderItem
+from apps.hr.models import Employee
 from django.utils import timezone
 
 # 레퍼런스 참고: 한국어 더미데이터
@@ -135,6 +136,7 @@ def create_product_variants(inventory_items):
             variant_code = f"{item.product_id}-{i:02d}"
 
             if not ProductVariant.objects.filter(variant_code=variant_code).exists():
+
                 variant = ProductVariant.objects.create(
                     product=item,
                     variant_code=variant_code,
@@ -144,6 +146,8 @@ def create_product_variants(inventory_items):
                     price=random.randint(100000, 3000000),
                     description=f"{item.name} - {color} 색상",
                     memo=random.choice(["인기 상품", "창고 보유", "입고 예정", ""]),
+                    order_count = random.randint(0, 500),
+                    return_count = random.randint(0, 100)
                 )
                 product_variants.append(variant)
             else:
@@ -152,36 +156,11 @@ def create_product_variants(inventory_items):
     print_status(f"상품 옵션 생성 완료: {len(product_variants)}개", "   ✓")
     return product_variants
 
-def create_orders(product_variants):
-    """주문 데이터 생성"""
-    print_status("주문 데이터 생성 중...", "📋")
-
-    if not product_variants:
-        print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "⚠️")
-        return []
-
-    orders = []
-
-    for i in range(20):
-        variant = random.choice(product_variants)
-
-        order = Order.objects.create(
-            variant=variant,  # 🔥 바뀐 포인트!
-            supplier_id=random.randint(1, 10),
-            quantity=random.randint(1, 50),
-            status=random.choice(ORDER_STATUSES),
-            order_date=timezone.now() - timedelta(days=random.randint(0, 30)),
-            note=random.choice(["긴급 요청", "기본 주문", "", None])  # note 필드 예시로도 추가 가능
-        )
-        orders.append(order)
-
-    print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
-    return orders
-
 def create_suppliers(product_variants):
     """공급업체 및 SupplierVariant 연결"""
     print_status("공급업체 데이터 생성 중...", "🏢")
 
+    # 1. 공급업체 생성
     suppliers = []
     for name, contact, manager, email, address in SUPPLIERS_DATA:
         supplier, created = Supplier.objects.get_or_create(
@@ -196,21 +175,124 @@ def create_suppliers(product_variants):
         suppliers.append(supplier)
         print_status(f"공급업체 생성: {name}", "   ✓" if created else "   •")
 
-        # 각 supplier에 3~5개의 variant 무작위 연결
-        selected_variants = random.sample(product_variants, random.randint(3, 5))
+    # 2. 모든 variant를 최소 하나의 공급업체에 매핑 (순환 방식)
+    supplier_count = len(suppliers)
+    for i, variant in enumerate(product_variants):
+        primary_supplier = suppliers[i % supplier_count]
+        _link_supplier_variant(primary_supplier, variant, is_primary=True)
+
+    # 3. 일부 variant는 추가 supplier 1~2개와 연결 (is_primary=False)
+    extra_variants = random.sample(product_variants, k=int(len(product_variants) * 0.4))  # 약 40%만 추가 연결
+    for variant in extra_variants:
+        available_suppliers = [s for s in suppliers if not SupplierVariant.objects.filter(supplier=s, variant=variant).exists()]
+        extra_suppliers = random.sample(available_suppliers, k=min(len(available_suppliers), random.randint(1, 2)))
+        for supplier in extra_suppliers:
+            _link_supplier_variant(supplier, variant, is_primary=False)
+
+    print_status(f"총 {len(suppliers)}개의 공급업체 등록 및 매핑 완료", "✓")
+    return suppliers
+
+
+def _link_supplier_variant(supplier, variant, is_primary=False):
+    """SupplierVariant 안전 연결 및 누락 필드 보완"""
+    cost_price = int(variant.price * random.uniform(0.6, 0.8))
+    lead_time_days = random.randint(2, 10)
+
+    sv, created = SupplierVariant.objects.get_or_create(
+        supplier=supplier,
+        variant=variant,
+        defaults={
+            "cost_price": cost_price,
+            "lead_time_days": lead_time_days,
+            "is_primary": is_primary
+        }
+    )
+
+    if not created:
+        updated = False
+        if sv.cost_price is None:
+            sv.cost_price = cost_price
+            updated = True
+        if sv.lead_time_days is None:
+            sv.lead_time_days = lead_time_days
+            updated = True
+        if sv.is_primary is None:
+            sv.is_primary = is_primary
+            updated = True
+        if updated:
+            sv.save()
+
+def create_orders(product_variants):
+    print_status("주문 데이터 생성 중...", "📋")
+
+    if not product_variants:
+        print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "⚠️")
+        return []
+
+    manager_pool = list(Employee.objects.all())
+    print("manager_pool:", manager_pool)
+    if not manager_pool:
+        print_status("매니저 계정이 없어 주문에 할당할 수 없습니다.", "⚠️")
+        return []
+
+    orders = []
+
+    for _ in range(20):
+        # ✅ supplier와 연결된 variant만 필터
+        eligible_variants = [
+            v for v in product_variants
+            if SupplierVariant.objects.filter(variant=v).exists()
+        ]
+        if len(eligible_variants) < 1:
+            continue
+
+        num_items = random.randint(1, 4)
+        selected_variants = random.sample(eligible_variants, k=min(num_items, len(eligible_variants)))
+
+        # ✅ 각 variant가 연결된 supplier 중에서 가장 많이 겹치는 공급업체 선택
+        supplier_counts = {}
         for variant in selected_variants:
-            SupplierVariant.objects.get_or_create(
-                supplier=supplier,
+            for sv in SupplierVariant.objects.filter(variant=variant):
+                supplier_counts[sv.supplier] = supplier_counts.get(sv.supplier, 0) + 1
+
+        if not supplier_counts:
+            continue
+
+        # 가장 많은 variant와 연결된 공급업체 선택
+        supplier = max(supplier_counts.items(), key=lambda x: x[1])[0]
+        manager = random.choice(manager_pool)
+
+        order = Order.objects.create(
+            supplier=supplier,
+            manager=manager,
+            status=random.choice(ORDER_STATUSES),
+            order_date=timezone.now() - timedelta(days=random.randint(0, 30)),
+            expected_delivery_date=timezone.now() + timedelta(days=random.randint(2, 14)),
+            instruction_note=random.choice(["포장 필수", "입고 후 확인 전화 요망", "문 앞 비대면 수령", ""]),
+            note=random.choice(["긴급 요청", "기본 주문", ""])
+        )
+
+        for variant in selected_variants:
+            try:
+                supplier_variant = SupplierVariant.objects.get(variant=variant, supplier=supplier)
+            except SupplierVariant.DoesNotExist:
+                continue
+
+            OrderItem.objects.create(
+                order=order,
                 variant=variant,
-                defaults={
-                    "cost_price": int(variant.price * random.uniform(0.6, 0.8)),
-                    "lead_time_days": random.randint(2, 10),
-                    "is_primary": random.choice([True, False])
-                }
+                item_name=variant.product.name,
+                spec=variant.option,
+                quantity=random.randint(1, 50),
+                unit_price=supplier_variant.cost_price,
+                remark=random.choice(["단가 협의됨", ""])
             )
 
-    print_status(f"총 {len(suppliers)}개의 공급업체 등록 완료", "✓")
-    return suppliers
+        orders.append(order)
+
+    print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
+    return orders
+
 
 def display_summary():
     """생성된 데이터 요약 표시 (레퍼런스 스타일)"""
@@ -260,8 +342,8 @@ def main():
         employees = create_employees()
         inventory_items = create_inventory_items()
         product_variants = create_product_variants(inventory_items)
-        orders = create_orders(product_variants)
         suppliers = create_suppliers(product_variants)
+        orders = create_orders(product_variants)
         
         print_status("더미데이터 생성이 완료되었습니다!", "✅")
         display_summary()
