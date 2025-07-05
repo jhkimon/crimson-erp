@@ -12,10 +12,12 @@ class SupplierOptionSerializer(serializers.ModelSerializer):
 
 # Variant 필수 정보만 가져옴.
 class ProductVariantSimpleSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
     class Meta:
         model = ProductVariant
-        fields = ['id', 'variant_code', 'option']
-
+        fields = ['id', 'option', 'stock', 'name']
+    def get_name(self, obj):
+            return obj.product.name
 
 # Supplier 전체
 class SupplierSerializer(serializers.ModelSerializer):
