@@ -97,6 +97,13 @@ class OrderDetailView(APIView):
         if not new_status:
             return Response({"error": "Missing 'status'"}, status=status.HTTP_400_BAD_REQUEST)
 
+        valid_statuses = [choice[0] for choice in Order.ORDER_STATUS_CHOICES]
+        if new_status not in valid_statuses:
+            return Response({
+                "error": f"'{new_status}'는 유효하지 않은 상태입니다.",
+                "valid_choices": valid_statuses
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         previous_status = order.status
         order.status = new_status
         order.save()
@@ -107,6 +114,7 @@ class OrderDetailView(APIView):
                 "error": "이미 동일한 상태입니다. 상태를 변경하려면 다른 값을 입력하세요.",
                 "status": new_status
             }, status=status.HTTP_400_BAD_REQUEST)
+    
 
         # 완료 X -> COMPLETED (재고 증가)
         if previous_status != "COMPLETED" and new_status == "COMPLETED":
