@@ -2,7 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework import status
-from .models import Order
+from apps.orders.models import Order, OrderItem
+from apps.inventory.models import ProductVariant
 from .serializers import OrderWriteSerializer, OrderReadSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -69,6 +70,12 @@ class OrderDetailView(APIView):
         order.delete()
         return Response({"message": "Order deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
 
+    def get_object(self, order_id):
+            try:
+                return Order.objects.get(id=order_id)
+            except Order.DoesNotExist:
+                return None
+
     @swagger_auto_schema(
         operation_summary="주문 상태 변경하기",
         operation_description="Update the status of a specific order.",
@@ -86,11 +93,72 @@ class OrderDetailView(APIView):
         if not order:
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        status_val = request.data.get('status')
-        if not status_val:
+        new_status = request.data.get('status')
+        if not new_status:
             return Response({"error": "Missing 'status'"}, status=status.HTTP_400_BAD_REQUEST)
 
-        order.status = status_val
+        previous_status = order.status
+        order.status = new_status
         order.save()
+
+        # 이전 상태와 동일
+        if previous_status == new_status:
+            return Response({
+                "error": "이미 동일한 상태입니다. 상태를 변경하려면 다른 값을 입력하세요.",
+                "status": new_status
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 완료 X -> COMPLETED (재고 증가)
+        if previous_status != "COMPLETED" and new_status == "COMPLETED":
+            for item in order.items.all():
+                variant = item.variant
+                if variant:
+                    variant.stock = variant.stock + item.quantity
+                    variant.save()
+
+        # COMPLETED -> CANCELLED or APPROVED 변경 (재고 감소)
+        elif previous_status == "COMPLETED" and new_status != "COMPLETED":
+            for item in order.items.all():
+                variant = item.variant
+                if variant:
+                    if variant.stock < item.quantity:
+                        return Response({
+                            "error": "현재 재고가 부족하여 상태 변경이 불가능합니다.",
+                            "item": {
+                                "variant_code": variant.variant_code,
+                                "name": variant.product.name if variant.product else None,
+                                "option": variant.option if variant.option else None,
+                                "current_stock": variant.stock,
+                                "required_quantity": item.quantity,
+                                "remaining_stock_if_changed": variant.stock - item.quantity
+                            }
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    variant.stock -= item.quantity
+                    variant.save()
+
         serializer = OrderReadSerializer(order)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # 재고 변경 체크
+        stock_changes = []
+        for item in order.items.all():
+            variant = item.variant
+            if variant:
+                change = item.quantity
+                if previous_status != "COMPLETED" and new_status == "COMPLETED":
+                    before = variant.stock - change
+                elif previous_status == "COMPLETED" and new_status != "COMPLETED":
+                    before = variant.stock + change
+                else:
+                    before = variant.stock
+                stock_changes.append({
+                    "variant_code": variant.variant_code,
+                    "name": variant.product.name if variant.product else None,
+                    "option": variant.option if variant.option else None,
+                    "quantity": change,
+                    "stock_before": before,
+                    "stock_after": variant.stock
+                })
+
+        return Response({
+            "order": serializer.data,
+            "stock_changes": stock_changes
+        }, status=status.HTTP_200_OK)
