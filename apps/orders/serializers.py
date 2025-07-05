@@ -69,7 +69,7 @@ class OrderCompactSerializer(serializers.ModelSerializer):
     total_price = serializers.SerializerMethodField()
     product_names = serializers.SerializerMethodField()
     supplier = serializers.CharField(source='supplier.name', read_only=True)
-    manager = serializers.CharField(source='manager.username', read_only=True)
+    manager = serializers.CharField(source='manager.first_name', read_only=True)
 
     class Meta:
         model = Order
