@@ -18,6 +18,7 @@ class Employee(AbstractUser):
     
     # 추가 필드만 정의
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='STAFF')
+    full_name = models.CharField(max_length=50, default="이름없음")
     contact = models.CharField(max_length=20, blank=True, null=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='active')
 

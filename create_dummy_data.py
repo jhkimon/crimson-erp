@@ -28,10 +28,10 @@ from django.utils import timezone
 
 # 레퍼런스 참고: 한국어 더미데이터
 EMPLOYEES_DATA = [
-    ("admin", "MANAGER", "010-1234-5678", "active", True, True),
-    ("manager1", "MANAGER", "010-2345-6789", "active", False, True),
-    ("staff1", "STAFF", "010-3456-7890", "active", False, False),
-    ("staff2", "STAFF", "010-4567-8901", "inactive", False, False),
+    ("admin", "MANAGER", "010-1234-5678", "active", True, True, "유시진"),
+    ("manager1", "MANAGER", "010-2345-6789", "active", False, True, "넥스트"),
+    ("staff1", "STAFF", "010-3456-7890", "active", False, False, "배연준"),
+    ("staff2", "STAFF", "010-4567-8901", "inactive", False, False, "김정현"),
 ]
 
 PRODUCTS_DATA = [
@@ -79,14 +79,14 @@ def create_employees():
     print_status("직원 데이터 생성 중...", "👥")
     
     employees = []
-    for username, role, contact, status, is_superuser, is_staff in EMPLOYEES_DATA:
+    for username, role, contact, status, is_superuser, is_staff, real_name in EMPLOYEES_DATA:
         
         if not Employee.objects.filter(username=username).exists():
             employee = Employee.objects.create_user(
                 username=username,
                 email=f'{username}@crimsonerp.com',
                 password='crimson123',  # 테스트용 통일 비밀번호
-                first_name=f'{username.title()}',
+                first_name=real_name,
                 last_name='',
                 role=role,
                 contact=contact,
@@ -95,7 +95,7 @@ def create_employees():
                 is_staff=is_staff,
             )
             employees.append(employee)
-            print_status(f"직원 생성: {username} ({role})", "   ✓")
+            print_status(f"직원 생성: {real_name} ({username}, {role})", "   ✓")
         else:
             employees.append(Employee.objects.get(username=username))
     
