@@ -29,22 +29,23 @@ class EmployeeListCreateView(APIView):
         serializer = EmployeeListSerializer(employees, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(
-        operation_summary="직원 등록",
-        request_body=EmployeeCreateSerializer,
-        responses={
-            201: EmployeeDetailSerializer(),
-            400: "Bad Request"
-        }
-    )
-    def post(self, request):
-        """직원 등록"""
-        serializer = EmployeeCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            employee = serializer.save()
-            response_serializer = EmployeeDetailSerializer(employee)
-            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # 회원가입으로 대체
+    # @swagger_auto_schema(
+    #     operation_summary="직원 등록",
+    #     request_body=EmployeeCreateSerializer,
+    #     responses={
+    #         201: EmployeeDetailSerializer(),
+    #         400: "Bad Request"
+    #     }
+    # )
+    # def post(self, request):
+    #     """직원 등록"""
+    #     serializer = EmployeeCreateSerializer(data=request.data)
+    #     if serializer.is_valid():
+    #         employee = serializer.save()
+    #         response_serializer = EmployeeDetailSerializer(employee)
+    #         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class EmployeeDetailUpdateView(APIView):
     permission_classes = [IsAuthenticated]

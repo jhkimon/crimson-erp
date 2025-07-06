@@ -228,7 +228,7 @@ class ProductVariantCreateView(APIView):
 
 class ProductVariantDetailView(APIView):
     """
-    GET / PUT / DELETE: 특정 상품의 상세 정보 접근
+    GET / PATCH / DELETE: 특정 상품의 상세 정보 접근
     """
     permission_classes = [AllowAny]
 
@@ -252,10 +252,33 @@ class ProductVariantDetailView(APIView):
 
         serializer = ProductVariantSerializer(variant)
         return Response(serializer.data)
-
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 수정 (방패필통 크림슨)",
-        request_body=ProductVariantCreateSerializer,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["product_id", "name", "option", "stock", "price"],
+            properties={
+                "product_id": openapi.Schema(type=openapi.TYPE_STRING, example="P00000YC"),
+                "name": openapi.Schema(type=openapi.TYPE_STRING, example="방패 필통"),
+                "option": openapi.Schema(type=openapi.TYPE_STRING, example="색상 : 크림슨"),
+                "stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=100),
+                "price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
+                "min_stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=4),
+                "description": openapi.Schema(type=openapi.TYPE_STRING, example=""),
+                "memo": openapi.Schema(type=openapi.TYPE_STRING, example=""),
+                "suppliers": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "name": openapi.Schema(type=openapi.TYPE_STRING, example="넥스트물류"),
+                            "cost_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=3016),
+                            "is_primary": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
+                        }
+                    )
+                )
+            }
+        ),
         responses={200: ProductVariantSerializer, 400: "Bad Request", 404: "Not Found"}
     )
     def patch(self, request, variant_id: str):

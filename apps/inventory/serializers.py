@@ -85,11 +85,11 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
 
 ###### Create Update Delete를 위한 Serializer
 class SupplierVariantUpdateSerializer(serializers.Serializer):
-    supplier_name = serializers.CharField()
+    name = serializers.CharField()
     cost_price = serializers.IntegerField()
     is_primary = serializers.BooleanField()
 
-    def validate_supplier_name(self, value):
+    def validate_name(self, value):
         from apps.supplier.models import Supplier
         try:
             return Supplier.objects.get(name=value)
@@ -134,7 +134,7 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
         for s in suppliers_data:
             SupplierVariant.objects.create(
                 variant=variant,
-                supplier=s['supplier_name'],
+                supplier=s['name'],
                 cost_price=s['cost_price'],
                 is_primary=s.get('is_primary', False),
             )
@@ -163,7 +163,7 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             for s in suppliers_data:
                 SupplierVariant.objects.create(
                     variant=instance,
-                    supplier=s['supplier_name'],
+                    supplier=s['name'],
                     cost_price=s['cost_price'],
                     is_primary=s.get('is_primary', False),
                 )
