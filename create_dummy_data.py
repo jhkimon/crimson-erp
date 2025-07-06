@@ -28,10 +28,10 @@ from django.utils import timezone
 
 # 레퍼런스 참고: 한국어 더미데이터
 EMPLOYEES_DATA = [
-    ("admin", "MANAGER", "010-1234-5678", "active", True, True, "유시진"),
-    ("manager1", "MANAGER", "010-2345-6789", "active", False, True, "넥스트"),
-    ("staff1", "STAFF", "010-3456-7890", "active", False, False, "배연준"),
-    ("staff2", "STAFF", "010-4567-8901", "inactive", False, False, "김정현"),
+    ("admin", "MANAGER", "010-1234-5678", "APPROVED", True, True, "유시진"),
+    ("manager1", "MANAGER", "010-2345-6789", "APPROVED", False, True, "넥스트"),
+    ("staff1", "STAFF", "010-3456-7890", "APPROVED", False, False, "배연준"),
+    ("staff2", "STAFF", "010-4567-8901", "DENIED", False, False, "김정현"),
 ]
 
 PRODUCTS_DATA = [

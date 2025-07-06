@@ -77,17 +77,21 @@ REST_FRAMEWORK = {
 }
 
 SWAGGER_SETTINGS = {
+    # 1) 스킴 정의 키 이름 통일: 'Bearer' 대신 'BearerAuth' 권장
     'SECURITY_DEFINITIONS': {
-        'Bearer': {
+        'BearerAuth': {
             'type': 'apiKey',
             'in': 'header',
             'name': 'Authorization',
-            'description': (
-                "JWT Authorization header using the Bearer scheme. "
-                "Example: 'Bearer {token}'"
-            ),
+            'description': "JWT를 'Bearer <token>' 형태로 입력",
         }
     },
+    # 2) 전역 기본 보안 스킴으로 지정
+    'DEFAULT_SECURITY': [
+        {'BearerAuth': []}
+    ],
+    # 3) 세션 인증 UI 끄기 (선택)
+    'USE_SESSION_AUTH': False,
 }
 
 # JWT Refresh Token 블랙리스트 설정

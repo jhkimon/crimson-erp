@@ -5,17 +5,16 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import JSONParser
-
-# Serializer
 from apps.authentication.serializers import RegisterSerializer
-# 문서화
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
          
 User = get_user_model()
-# 🔹 Signup API
+
+from django.db import IntegrityError
+
 class SignupView(APIView):
-    permission_classes = [AllowAny]  # 누구나 접근 가능
+    permission_classes = [AllowAny]
     parser_classes = [JSONParser]
 
     @swagger_auto_schema(
@@ -23,12 +22,16 @@ class SignupView(APIView):
         operation_description="새로운 사용자를 등록하고, JWT 토큰을 반환합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["username", "email", "password"],
+            required=["username", "email", "password", "full_name", "contact", "role", "status"],
             properties={
-                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디 (유니크)"),
-                "email": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_EMAIL, description="이메일"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="비밀번호"),
-            },
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디", example="test01"),
+                "email": openapi.Schema(type=openapi.TYPE_STRING, format="email", example="test@example.com"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format="password", example="crimson123"),
+                "full_name": openapi.Schema(type=openapi.TYPE_STRING, example="테스트"),
+                "contact": openapi.Schema(type=openapi.TYPE_STRING, example="010-1234-5678"),
+                "role": openapi.Schema(type=openapi.TYPE_STRING, example="STAFF"),
+                "status": openapi.Schema(type=openapi.TYPE_STRING, example="inactive"),
+            }
         ),
         responses={
             201: openapi.Schema(
@@ -45,44 +48,96 @@ class SignupView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
-            User = serializer.save()    
-            refresh = RefreshToken.for_user(User)  # ✅ JWT만 발급 (Token 제거)
-            return Response(
-                {
-                    "message": "Signup successful",
-                    "access_token": str(refresh.access_token),
-                    "refresh_token": str(refresh),
-                },
-                status=status.HTTP_201_CREATED,
-            )
+            try:
+                user = serializer.save()
+                refresh = RefreshToken.for_user(user)
+                return Response(
+                    {
+                        "message": "Signup successful",
+                        "access_token": str(refresh.access_token),
+                        "refresh_token": str(refresh),
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+            except IntegrityError as e:
+                return Response(
+                    {"error": "이미 사용 중인 사용자 이름(username) 또는 이메일입니다."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+class ApproveStaffView(APIView):
+    permission_classes = [IsAuthenticated]
 
-# 🔹 Login API
+    @swagger_auto_schema(
+        operation_summary="STAFF 계정 상태 전환",
+        operation_description="MANAGER가 STAFF 계정을 승인하거나 비활성화할 수 있습니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["username", "status"],
+            properties={
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="STAFF 사용자 아이디", example="staff1"),
+                "status": openapi.Schema(type=openapi.TYPE_STRING, enum=["approved", "denied"], description="변경할 상태", example="denied"),
+            }
+        ),
+        responses={
+            200: "상태 변경 성공",
+            400: "잘못된 요청",
+            403: "권한 없음",
+            404: "STAFF 없음"
+        },
+        security=[{"BearerAuth": []}],
+    )
+    def post(self, request):
+        if request.user.role != "MANAGER":
+            return Response({"error": "STAFF 상태 변경 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+
+        username = request.data.get("username")
+        new_status = request.data.get("status")
+
+        if not username or new_status not in ["approved", "denied"]:
+            return Response({"error": "username과 유효한 status(approved/denied)가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "해당 사용자가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.role != "STAFF":
+            return Response({"error": "해당 사용자는 STAFF가 아닙니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 상태 전환
+        user.status = new_status
+        user.save()
+
+        return Response({"message": f"{username} 계정이 {new_status} 상태로 변경되었습니다."}, status=status.HTTP_200_OK)
+
+# Login API
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_summary="로그인",
-        operation_description="사용자 로그인 후 JWT 토큰을 반환합니다.",
+        operation_description="사용자 로그인 후 JWT 토큰을 반환합니다. STAFF의 경우 active 상태여야 로그인 가능합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "password"],
             properties={
-                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디"),
-                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="비밀번호"),
+                "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디", example="staff1"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_PASSWORD, description="비밀번호", example="crimson123"),
             },
         ),
         responses={
             200: openapi.Schema(
                 type=openapi.TYPE_OBJECT,
                 properties={
-                    "message": openapi.Schema(type=openapi.TYPE_STRING, description="성공 메시지"),
-                    "access_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 액세스 토큰"),
-                    "refresh_token": openapi.Schema(type=openapi.TYPE_STRING, description="JWT 리프레시 토큰"),
+                    "message": openapi.Schema(type=openapi.TYPE_STRING),
+                    "access_token": openapi.Schema(type=openapi.TYPE_STRING),
+                    "refresh_token": openapi.Schema(type=openapi.TYPE_STRING),
                 },
             ),
             401: "잘못된 로그인 정보",
+            403: "승인되지 않은 계정"
         },
     )
     def post(self, request):
@@ -92,7 +147,10 @@ class LoginView(APIView):
         user = authenticate(username=username, password=password)
 
         if user is not None:
-            refresh = RefreshToken.for_user(user)  # ✅ JWT만 발급 (Token 제거)
+            if user.role == "STAFF" and user.status != "approved":
+                return Response({"error": "승인되지 않은 STAFF 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
+
+            refresh = RefreshToken.for_user(user)
             return Response(
                 {
                     "message": "Login successful",
@@ -101,7 +159,8 @@ class LoginView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
-        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({"error": "존재하지 않는 계정입니다."}, status=status.HTTP_401_UNAUTHORIZED)
+
 
 
 # 🔹 Logout API

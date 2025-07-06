@@ -9,8 +9,8 @@ class Employee(AbstractUser):
     ]
 
     STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('inactive', 'Inactive'),
+        ('APPROVED', 'Approved'),
+        ('DENIED', 'Denied'),
     ]
 
     # AbstractUser에서 이미 제공하는 필드들:
@@ -20,7 +20,7 @@ class Employee(AbstractUser):
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='STAFF')
     full_name = models.CharField(max_length=50, default="이름없음")
     contact = models.CharField(max_length=20, blank=True, null=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='active')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='denied')
 
     class Meta:
         db_table = 'auth_user'  # 테이블명을 auth_user로 설정
