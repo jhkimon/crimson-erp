@@ -9,15 +9,26 @@ class SupplierOptionSerializer(serializers.ModelSerializer):
         model = Supplier
         fields = ['id', 'name', 'contact', 'manager', 'email', 'address']
 
-
-# Variant 필수 정보만 가져옴.
-class ProductVariantSimpleSerializer(serializers.ModelSerializer):
+# Supplier <> Variant Mapping Table 읽기용
+class SupplierVariantDetailSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='variant.id')
+    option = serializers.CharField(source='variant.option')
+    stock = serializers.IntegerField(source='variant.stock')
     name = serializers.SerializerMethodField()
+
     class Meta:
-        model = ProductVariant
-        fields = ['id', 'option', 'stock', 'name']
+        model = SupplierVariant
+        fields = ['id', 'option', 'stock', 'name', 'cost_price', 'is_primary']
+
     def get_name(self, obj):
-            return obj.product.name
+        return obj.variant.product.name
+    
+# Supplier <> Variant Mapping Table 수정용
+class SupplierVariantUpdateTableSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupplierVariant
+        fields = ['id', 'cost_price', 'is_primary']
+        read_only_fields = ['id']  # id는 변경하지 않고 참조만 할 수 있게 설정
 
 # Supplier 전체
 class SupplierSerializer(serializers.ModelSerializer):
@@ -26,14 +37,18 @@ class SupplierSerializer(serializers.ModelSerializer):
         child=serializers.CharField(), write_only=True, required=False
     )
     # variants는 출력용(read-only)
-    variants = ProductVariantSimpleSerializer(many=True, read_only=True)
+    variants = serializers.SerializerMethodField()
 
     class Meta:
         model = Supplier
         fields = [
             'id', 'name', 'contact', 'manager', 'email', 'address',
-            'variant_codes', 'variants',
+            'variant_codes', 'variants'
         ]
+
+    def get_variants(self, obj):
+        supplier_variants = SupplierVariant.objects.filter(supplier=obj).select_related('variant__product')
+        return SupplierVariantDetailSerializer(supplier_variants, many=True).data
 
     def create(self, validated_data):
         variant_codes = validated_data.pop('variant_codes', [])

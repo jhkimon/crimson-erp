@@ -29,8 +29,6 @@ class SignupView(APIView):
                 "password": openapi.Schema(type=openapi.TYPE_STRING, format="password", example="crimson123"),
                 "full_name": openapi.Schema(type=openapi.TYPE_STRING, example="테스트"),
                 "contact": openapi.Schema(type=openapi.TYPE_STRING, example="010-1234-5678"),
-                "role": openapi.Schema(type=openapi.TYPE_STRING, example="STAFF"),
-                "status": openapi.Schema(type=openapi.TYPE_STRING, example="inactive"),
             }
         ),
         responses={

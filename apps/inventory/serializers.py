@@ -54,12 +54,12 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
     def get_suppliers(self, obj):
-        # SupplierVariant와 연결된 정보들을 반환
         variants = SupplierVariant.objects.select_related("supplier").filter(variant=obj)
         return [
             {
                 "name": sv.supplier.name,
                 "is_primary": sv.is_primary,
+                "cost_price": sv.cost_price,
             }
             for sv in variants
         ]
