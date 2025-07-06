@@ -18,9 +18,9 @@ class ProductVariant(models.Model):
     variant_code = models.CharField(max_length=50, unique=True)
     option = models.CharField(max_length=255)
     
-    stock = models.PositiveIntegerField()
+    stock = models.IntegerField(default=0)
     min_stock = models.PositiveIntegerField(default=0) 
-    price = models.PositiveIntegerField()
+    price = models.PositiveIntegerField(default=0)
 
     description = models.TextField(blank=True, null=True)
     memo = models.TextField(blank=True, null=True) 

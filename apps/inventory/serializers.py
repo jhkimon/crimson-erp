@@ -19,6 +19,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     suppliers = serializers.SerializerMethodField()
     cost_price = serializers.SerializerMethodField()
     product_id = serializers.CharField(source='product.product_id', read_only=True)
+    sales = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariant
@@ -34,6 +35,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             'cost_price',           # 원가
             'order_count',          # 판매수량
             'return_count',          # 환불수량
+            'sales',
             'suppliers'             # 공급자명
         ]
 
@@ -67,6 +69,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         if not prices:
             return None
         return sum(prices) // len(prices)
+    
+    def get_sales(self, obj):
+        return obj.price * (obj.order_count - obj.return_count)
     
     
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):

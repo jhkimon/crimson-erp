@@ -35,9 +35,33 @@ EMPLOYEES_DATA = [
 ]
 
 PRODUCTS_DATA = [
-    "갤럭시 S24 Ultra", "iPhone 15 Pro", "MacBook Pro 16인치", "iPad Air",
-    "Dell XPS 13", "LG 27인치 모니터", "Sony WH-1000XM5", "AirPods Pro 2세대"
+    "2025년 탁상용 달력",
+    "2025년 벽걸이 달력",
+    "미니 에코백 (코리아)",
+    "L 홀더 (파일)",
+    "수저 세트",
+    "방패 필통",
+    "고려대 피규어 키링",
+    "세도나 볼펜",
+    "슬립 텀블러",
+    "호이 야구잠바 인형",
+    "호이 키링 인형"
 ]
+
+VARIANT_DATA = [
+    ("P00000OD", None, "2025년 탁상용 달력", "", 9000, 0, 65, 0),
+    ("P0000BDB", None, "2025년 탁상용 달력", "", 9000, 0, 64, 0),
+    ("P00000NB", None, "미니 에코백 (코리아)", "", 6000, 0, 50, 0),
+    ("P00000XN", "P00000XN000A", "L 홀더 (파일)", "디자인 : 초충도첩 식물", 500, 74, 35, 0),
+    ("P0000BBO", None, "수저 세트", "", 12000, 0, 22, 1),
+    ("P00000YC", "P00000YC000A", "방패 필통", "색상 : 크림슨", 5000, 100, 19, 0),
+    ("P00000ZQ", "P00000ZQ000A", "고려대 피규어 키링", "디자인 : 남학생", 8800, 90, 16, 0),
+    ("P00000PR", "P00000PR000A", "슬립 텀블러", "색상 : 아이보리", 19000, 40, 15, 0),
+    ("P00000OY", None, "호이 야구잠바 인형", "", 27000, 0, 15, 0),
+    ("P00000OW", "P00000OW000B", "호이 키링 인형", "색상 : 크림슨", 12000, 0, 14, 0),
+    ("P00000YC", "P00000YC000C", "방패 필통", "색상 : 블랙", 5000, 0, 13, 0),
+]
+
 
 SUPPLIERS_DATA = [
     ("대한유통", "010-6675-7797", "박한솔", "hspark_factcorp@kakao.com", "서울특별시 성북구 안암로145"),
@@ -103,13 +127,17 @@ def create_employees():
 
 
 def create_inventory_items():
-    """상품 데이터 생성 (레퍼런스의 products 참고)"""
+    """VARIANT_DATA 기반으로 상품 생성"""
     print_status("상품 데이터 생성 중...", "📦")
-    
+
+    seen = set()
     inventory_items = []
-    for i, product_name in enumerate(PRODUCTS_DATA, 1):
-        product_id = f'P{1000 + i}'
-        
+
+    for product_id, _, product_name, *_ in VARIANT_DATA:
+        if product_id in seen:
+            continue
+        seen.add(product_id)
+
         if not InventoryItem.objects.filter(product_id=product_id).exists():
             item = InventoryItem.objects.create(
                 product_id=product_id,
@@ -119,41 +147,43 @@ def create_inventory_items():
             print_status(f"상품 생성: {product_name} ({product_id})", "   ✓")
         else:
             inventory_items.append(InventoryItem.objects.get(product_id=product_id))
-    
+
     return inventory_items
 
-
 def create_product_variants(inventory_items):
-    """상품 옵션 생성 (description, memo 포함)"""
-    print_status("상품 옵션 생성 중...", "🎨")
-
+    """실제 상품 및 옵션 기반으로 ProductVariant 생성"""
+    print_status("상품 옵션 생성 중 (실제값 기반)...", "🎯")
     product_variants = []
-    for item in inventory_items:
-        num_variants = random.randint(2, 4)
-        selected_colors = random.sample(COLORS, min(num_variants, len(COLORS)))
 
-        for i, color in enumerate(selected_colors, 1):
-            variant_code = f"{item.product_id}-{i:02d}"
+    # InventoryItem dict for fast lookup
+    product_dict = {item.product_id: item for item in inventory_items}
 
-            if not ProductVariant.objects.filter(variant_code=variant_code).exists():
+    for product_id, variant_code, name, option, price, stock, order_count, return_count in VARIANT_DATA:
+        if product_id not in product_dict:
+            continue  # 해당 상품이 inventory에 없으면 생략
 
-                variant = ProductVariant.objects.create(
-                    product=item,
-                    variant_code=variant_code,
-                    option=color,
-                    stock=random.randint(10, 100),
-                    min_stock=random.randint(1, 30),
-                    price=random.randint(100000, 3000000),
-                    description=f"{item.name} - {color} 색상",
-                    memo=random.choice(["인기 상품", "창고 보유", "입고 예정", ""]),
-                    order_count = random.randint(0, 500),
-                    return_count = random.randint(0, 100)
-                )
-                product_variants.append(variant)
-            else:
-                product_variants.append(ProductVariant.objects.get(variant_code=variant_code))
+        product = product_dict[product_id]
+        final_variant_code = variant_code or f"{product_id}000A"
 
-    print_status(f"상품 옵션 생성 완료: {len(product_variants)}개", "   ✓")
+        if not ProductVariant.objects.filter(variant_code=final_variant_code).exists():
+            variant = ProductVariant.objects.create(
+                product=product,
+                variant_code=final_variant_code,
+                option=option or "기본",
+                stock=stock,
+                min_stock=random.randint(1, 10),
+                price=price,
+                description=f"{name} {option}".strip(),
+                memo=random.choice(["", "인기 상품", "한정 재고"]),
+                order_count=order_count,
+                return_count=return_count,
+            )
+            product_variants.append(variant)
+        else:
+            variant = ProductVariant.objects.get(variant_code=final_variant_code)
+            product_variants.append(variant)
+
+    print_status(f"실제 상품 옵션 생성 완료: {len(product_variants)}개", "   ✓")
     return product_variants
 
 def create_suppliers(product_variants):
