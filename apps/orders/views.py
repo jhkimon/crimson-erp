@@ -24,8 +24,34 @@ class OrderListView(APIView):
 
     @swagger_auto_schema(
         operation_summary="주문 생성하기",
-        operation_description="Submit a new order with required fields.",
-        request_body=OrderWriteSerializer,
+        operation_description="주문을 생성합니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["supplier", "order_date", "expected_delivery_date", "status", "items"],
+            properties={
+                "supplier": openapi.Schema(type=openapi.TYPE_INTEGER, example=1),
+                "order_date": openapi.Schema(type=openapi.TYPE_STRING, format="date", example="2025-07-07"),
+                "expected_delivery_date": openapi.Schema(type=openapi.TYPE_STRING, format="date", example="2025-07-09"),
+                "status": openapi.Schema(type=openapi.TYPE_STRING, example="PENDING"),
+                "instruction_note": openapi.Schema(type=openapi.TYPE_STRING, example="납품 전에 전화주세요"),
+                "note": openapi.Schema(type=openapi.TYPE_STRING, example="발주 요청"),
+                "vat_included": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
+                "packaging_included": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=False),
+                "items": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "variant_code": openapi.Schema(type=openapi.TYPE_STRING, example="P00000XN000A"),
+                            "quantity": openapi.Schema(type=openapi.TYPE_INTEGER, example=100),
+                            "unit_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
+                            "remark": openapi.Schema(type=openapi.TYPE_STRING, example="박스 포장"),
+                            "spec": openapi.Schema(type=openapi.TYPE_STRING, example="B급")
+                        }
+                    )
+                )
+            }
+        ),
         responses={201: OrderReadSerializer}
     )
     def post(self, request, *args, **kwargs):

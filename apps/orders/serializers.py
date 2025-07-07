@@ -38,8 +38,27 @@ class OrderReadSerializer(serializers.ModelSerializer):
         ]
 
 # POST / PUT 용
+
+class OrderItemWriteSerializer(serializers.ModelSerializer):
+    variant_code = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = ['variant_code', 'quantity', 'unit_price', 'remark', 'spec']
+
+    def create(self, validated_data):
+        variant_code = validated_data.pop('variant_code')
+        try:
+            variant = ProductVariant.objects.get(variant_code=variant_code)
+        except ProductVariant.DoesNotExist:
+            raise serializers.ValidationError({
+                "variant_code": f"variant_code '{variant_code}' does not exist."
+            })
+        return OrderItem(variant=variant, **validated_data)
+    
+
 class OrderWriteSerializer(serializers.ModelSerializer):
-    items = OrderItemSerializer(many=True)
+    items = OrderItemWriteSerializer(many=True)
     supplier = serializers.PrimaryKeyRelatedField(queryset=Supplier.objects.all())
 
     class Meta:
@@ -59,10 +78,12 @@ class OrderWriteSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items_data = validated_data.pop('items')
         order = Order.objects.create(**validated_data)
-        for item in items_data:
-            OrderItem.objects.create(order=order, **item)
-        return order
 
+        for item_data in items_data:
+            item = OrderItemWriteSerializer().create(item_data)
+            item.order = order
+            item.save()
+        return order
 
 class OrderCompactSerializer(serializers.ModelSerializer):
     total_quantity = serializers.SerializerMethodField()

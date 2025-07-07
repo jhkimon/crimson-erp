@@ -8,6 +8,6 @@ urlpatterns = [
     path("items/variants/", ProductVariantCreateView.as_view(), name="variant-create"),
     path("items/<str:product_id>/", InventoryItemView.as_view(),
          name="inventoryitem-detail"), 
-    path("items/variants/<str:variant_id>/", ProductVariantDetailView.as_view(), name="variant-detail"),
+    path("items/variants/<str:variant_code>/", ProductVariantDetailView.as_view(), name="variant-detail"),
     path("upload/", ProductVariantCSVUploadView.as_view(), name="product-variant-upload"),
 ]

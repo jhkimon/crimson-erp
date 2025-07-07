@@ -236,7 +236,7 @@ class ProductVariantDetailView(APIView):
         operation_summary="세부 품목 정보 조회 (방패필통 크림슨)",
         manual_parameters=[
             openapi.Parameter(
-                name="variant_id",
+                name="variant_code",
                 in_=openapi.IN_PATH,
                 description="조회할 variant_code (예: P00000XN000A)",
                 type=openapi.TYPE_STRING
@@ -244,16 +244,25 @@ class ProductVariantDetailView(APIView):
         ],
         responses={200: ProductVariantSerializer, 404: "Not Found"}
     )
-    def get(self, request, variant_id: str):
+    def get(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_id)
+            variant = ProductVariant.objects.get(variant_code=variant_code)
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
         serializer = ProductVariantSerializer(variant)
         return Response(serializer.data)
+    
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 수정 (방패필통 크림슨)",
+        manual_parameters=[
+        openapi.Parameter(
+                name="variant_code",
+                in_=openapi.IN_PATH,
+                description="수정할 variant_code (예: P00000XN000A)",
+                type=openapi.TYPE_STRING
+            )
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["product_id", "name", "option", "stock", "price"],
@@ -281,9 +290,9 @@ class ProductVariantDetailView(APIView):
         ),
         responses={200: ProductVariantSerializer, 400: "Bad Request", 404: "Not Found"}
     )
-    def patch(self, request, variant_id: str):
+    def patch(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_id)
+            variant = ProductVariant.objects.get(variant_code=variant_code)
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
@@ -295,11 +304,19 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 삭제 (방패필통 크림슨)",
+        manual_parameters=[
+            openapi.Parameter(
+                name="variant_code",
+                in_=openapi.IN_PATH,
+                description="삭제할 variant_code (예: P00000XN000A)",
+                type=openapi.TYPE_STRING
+            )
+        ],
         responses={204: "삭제 완료", 404: "Not Found"}
     )
-    def delete(self, request, variant_id: str):
+    def delete(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_id)
+            variant = ProductVariant.objects.get(variant_code=variant_code)
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
