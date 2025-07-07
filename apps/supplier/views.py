@@ -68,17 +68,14 @@ class SupplierRetrieveUpdateView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-
 class SupplierVariantUpdateView(APIView):
     @swagger_auto_schema(
         operation_summary="공급업체-상품 옵션 매핑 수정",
         request_body=SupplierVariantUpdateTableSerializer,
         responses={200: SupplierVariantUpdateTableSerializer}
     )
-    def patch(self, request, pk):
-        # 수정된 부분: variant_id 기준으로 SupplierVariant 찾기
-        variant = get_object_or_404(ProductVariant, id=pk)
-        sv = get_object_or_404(SupplierVariant, variant=variant)
+    def patch(self, request, supplier_id, variant_id):
+        sv = get_object_or_404(SupplierVariant, supplier_id=supplier_id, variant_id=variant_id)
 
         serializer = SupplierVariantUpdateTableSerializer(sv, data=request.data, partial=True)
         if serializer.is_valid():

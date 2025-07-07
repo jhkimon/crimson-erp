@@ -4,5 +4,5 @@ from apps.supplier.views import SupplierListCreateView, SupplierRetrieveUpdateVi
 urlpatterns = [
     path('', SupplierListCreateView.as_view(), name='supplier-list-create'),
     path('<int:pk>/', SupplierRetrieveUpdateView.as_view(), name='supplier-detail'),
-    path('variant/<int:pk>/', SupplierVariantUpdateView.as_view(), name='supplier-variant-update'),
+    path('variant/<int:supplier_id>/<int:variant_id>/', SupplierVariantUpdateView.as_view(), name='supplier-variant-update')
 ]
