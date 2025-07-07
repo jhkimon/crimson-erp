@@ -246,7 +246,9 @@ class ProductVariantDetailView(APIView):
     )
     def get(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_code)
+            variant = ProductVariant.objects.filter(variant_code=variant_code, is_active=True).first()
+            if not variant:
+                return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
@@ -320,5 +322,6 @@ class ProductVariantDetailView(APIView):
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
-        variant.delete()
+        variant.is_active = False
+        variant.save()
         return Response(status=204)

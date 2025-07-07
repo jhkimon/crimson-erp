@@ -75,13 +75,15 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     
     
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
-    variants = ProductVariantSerializer(many=True, read_only=True)
+    variants = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
         fields = ['product_id', 'name', 'variants']
 
-
+    def get_variants(self, obj):
+        active_variants = obj.variants.filter(is_active=True)
+        return ProductVariantSerializer(active_variants, many=True, context=self.context).data
 
 ###### Create Update Delete를 위한 Serializer
 class SupplierVariantUpdateSerializer(serializers.Serializer):
