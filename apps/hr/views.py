@@ -7,9 +7,7 @@ from .models import Employee
 from .serializers import (
     EmployeeListSerializer,
     EmployeeDetailSerializer,
-    EmployeeCreateSerializer,
     EmployeeUpdateSerializer,
-    EmployeeDeactivateSerializer
 )
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -62,9 +60,9 @@ class EmployeeDetailUpdateView(APIView):
         employee = get_object_or_404(Employee, id=employee_id)
         serializer = EmployeeDetailSerializer(employee)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
+    
     @swagger_auto_schema(
-        operation_summary="직원 정보 수정",
+        operation_summary="직원 정보 수정 (HR 전용)",
         request_body=EmployeeUpdateSerializer,
         responses={
             200: EmployeeDetailSerializer(),
@@ -72,30 +70,11 @@ class EmployeeDetailUpdateView(APIView):
             404: "Not Found"
         }
     )
-    def put(self, request, employee_id):
-        """직원 정보 수정"""
+    def patch(self, request, employee_id):
         employee = get_object_or_404(Employee, id=employee_id)
         serializer = EmployeeUpdateSerializer(employee, data=request.data, partial=True)
         if serializer.is_valid():
-            updated_employee = serializer.save()
-            response_serializer = EmployeeDetailSerializer(updated_employee)
+            serializer.save()
+            response_serializer = EmployeeDetailSerializer(employee)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @swagger_auto_schema(
-        operation_summary="직원 비활성화 (퇴사 처리)",
-        responses={
-            200: EmployeeDeactivateSerializer(),
-            400: "Bad Request",
-            404: "Not Found"
-        }
-    )
-    def patch(self, request, employee_id):
-        """직원 비활성화 (퇴사 처리)"""
-        employee = get_object_or_404(Employee, id=employee_id)
-        employee.is_active = False
-        employee.status = 'inactive'
-        employee.save()
-        
-        serializer = EmployeeDeactivateSerializer(employee, partial=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
