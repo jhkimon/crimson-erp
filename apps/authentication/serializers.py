@@ -8,12 +8,12 @@ class RegisterSerializer(serializers.ModelSerializer):
     username = serializers.CharField(max_length=150, help_text="사용자 아이디")
     email = serializers.EmailField(help_text="이메일")
     password = serializers.CharField(write_only=True, help_text="비밀번호")
-    full_name = serializers.CharField(max_length=50, help_text="이름")
+    first_name = serializers.CharField(max_length=50, help_text="이름")
     contact = serializers.CharField(max_length=20, help_text="연락처")
     class Meta:
         model = User
         fields = (
-            "username", "email", "password", "full_name", "contact"
+            "username", "email", "password", "first_name", "contact"
         )
 
     def create(self, validated_data):
@@ -23,5 +23,5 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["username", "email", "full_name", "contact", "role", "status"]
+        fields = ["username", "email", "first_name", "contact", "role", "status"]
         read_only_fields = fields

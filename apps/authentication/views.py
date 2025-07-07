@@ -22,12 +22,12 @@ class SignupView(APIView):
         operation_description="새로운 사용자를 등록하고, JWT 토큰을 반환합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["username", "email", "password", "full_name", "contact", "role", "status"],
+            required=["username", "email", "password", "first_name", "contact", "role", "status"],
             properties={
                 "username": openapi.Schema(type=openapi.TYPE_STRING, description="사용자 아이디", example="test01"),
                 "email": openapi.Schema(type=openapi.TYPE_STRING, format="email", example="test@example.com"),
                 "password": openapi.Schema(type=openapi.TYPE_STRING, format="password", example="crimson123"),
-                "full_name": openapi.Schema(type=openapi.TYPE_STRING, example="테스트"),
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, example="테스트"),
                 "contact": openapi.Schema(type=openapi.TYPE_STRING, example="010-1234-5678"),
             }
         ),
@@ -149,7 +149,7 @@ class LoginView(APIView):
                         properties={
                             "username": openapi.Schema(type=openapi.TYPE_STRING),
                             "email": openapi.Schema(type=openapi.TYPE_STRING),
-                            "full_name": openapi.Schema(type=openapi.TYPE_STRING),
+                            "first_name": openapi.Schema(type=openapi.TYPE_STRING),
                             "contact": openapi.Schema(type=openapi.TYPE_STRING),
                             "role": openapi.Schema(type=openapi.TYPE_STRING),
                             "status": openapi.Schema(type=openapi.TYPE_STRING),

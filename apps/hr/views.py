@@ -63,7 +63,16 @@ class EmployeeDetailUpdateView(APIView):
     
     @swagger_auto_schema(
         operation_summary="직원 정보 수정 (HR 전용)",
-        request_body=EmployeeUpdateSerializer,
+        operation_description="직원의 이메일, 연락처, 퇴사 여부를 수정합니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "email": openapi.Schema(type=openapi.TYPE_STRING, description="직원 이메일", example="john.doe@example.com"),
+                "contact": openapi.Schema(type=openapi.TYPE_STRING, description="직원 연락처", example="010-1234-5678"),
+                "is_active": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="퇴사 여부 (false이면 퇴사)", example=True),
+            },
+            required=[],
+        ),
         responses={
             200: EmployeeDetailSerializer(),
             400: "Bad Request",

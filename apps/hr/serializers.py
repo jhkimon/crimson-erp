@@ -7,7 +7,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         model = Employee
         fields = (
             'id', 'username', 'email', 'role', 'contact', 'status',
-            'is_active', 'is_superuser', 'is_staff', 'date_joined'
+            'first_name', 'is_active', 'date_joined'
         )
         read_only_fields = ('id', 'date_joined')
 
@@ -17,7 +17,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         model = Employee
         fields = (
             'id', 'username', 'email', 'role', 'contact', 'status',
-            'is_active', 'is_superuser', 'is_staff', 'date_joined', 'last_login'
+            'first_name', 'is_active', 'date_joined', 'last_login'
         )
         read_only_fields = ('id', 'date_joined', 'last_login')
 
@@ -26,11 +26,10 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Employee
         fields = (
-            'email', 'role', 'contact', 'is_active'
+            'email', 'contact', 'is_active'
         )
         extra_kwargs = {
             'email': {'required': False},
-            'role': {'required': False},
             'contact': {'required': False},
             'is_active': {'required': False}, # 퇴사 여부
         }
