@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import JSONParser
-from apps.authentication.serializers import RegisterSerializer
+from apps.authentication.serializers import RegisterSerializer, UserSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
          
@@ -111,12 +111,24 @@ class ApproveStaffView(APIView):
         return Response({"message": f"{username} 계정이 {new_status} 상태로 변경되었습니다."}, status=status.HTTP_200_OK)
 
 # Login API
+from django.contrib.auth import authenticate, get_user_model
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from apps.authentication.serializers import UserSerializer  # 수정: UserSerializer import
+
+User = get_user_model()
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_summary="로그인",
-        operation_description="사용자 로그인 후 JWT 토큰을 반환합니다. STAFF의 경우 active 상태여야 로그인 가능합니다.",
+        operation_description="사용자 로그인 후 JWT 토큰과 사용자 정보를 반환합니다. STAFF의 경우 approved 상태여야 로그인 가능합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "password"],
@@ -132,6 +144,17 @@ class LoginView(APIView):
                     "message": openapi.Schema(type=openapi.TYPE_STRING),
                     "access_token": openapi.Schema(type=openapi.TYPE_STRING),
                     "refresh_token": openapi.Schema(type=openapi.TYPE_STRING),
+                    "user": openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "username": openapi.Schema(type=openapi.TYPE_STRING),
+                            "email": openapi.Schema(type=openapi.TYPE_STRING),
+                            "full_name": openapi.Schema(type=openapi.TYPE_STRING),
+                            "contact": openapi.Schema(type=openapi.TYPE_STRING),
+                            "role": openapi.Schema(type=openapi.TYPE_STRING),
+                            "status": openapi.Schema(type=openapi.TYPE_STRING),
+                        }
+                    ),
                 },
             ),
             401: "잘못된 로그인 정보",
@@ -149,17 +172,19 @@ class LoginView(APIView):
                 return Response({"error": "승인되지 않은 STAFF 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
 
             refresh = RefreshToken.for_user(user)
+            user_data = UserSerializer(user).data
+
             return Response(
                 {
                     "message": "Login successful",
                     "access_token": str(refresh.access_token),
                     "refresh_token": str(refresh),
+                    "user": user_data
                 },
                 status=status.HTTP_200_OK,
             )
+
         return Response({"error": "존재하지 않는 계정입니다."}, status=status.HTTP_401_UNAUTHORIZED)
-
-
 
 # 🔹 Logout API
 class LogoutView(APIView):
