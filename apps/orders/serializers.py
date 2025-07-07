@@ -3,22 +3,25 @@ from apps.orders.models import Order, OrderItem
 from apps.inventory.models import ProductVariant
 from apps.supplier.models import Supplier
 from apps.inventory.serializers import ProductVariantSerializer
+from django.contrib.auth import get_user_model
 
 
+User = get_user_model()
 class OrderItemSerializer(serializers.ModelSerializer):
     item_name = serializers.SerializerMethodField()
+    variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
+
     class Meta:
         model = OrderItem
-        fields = ['id', 'variant', 'item_name', 'quantity', 'unit_price', 'remark', 'spec']
+        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit_price', 'remark', 'spec']
 
     def get_item_name(self, obj):
         return obj.variant.product.name if obj.variant and obj.variant.product else None
-
 # READ 전용
 class OrderReadSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     supplier = serializers.CharField(source='supplier.name', read_only=True)
-    manager = serializers.CharField(source='manager.username', read_only=True)
+    manager = serializers.CharField(source='manager.first_name', read_only=True)
 
     class Meta:
         model = Order
@@ -60,11 +63,13 @@ class OrderItemWriteSerializer(serializers.ModelSerializer):
 class OrderWriteSerializer(serializers.ModelSerializer):
     items = OrderItemWriteSerializer(many=True)
     supplier = serializers.PrimaryKeyRelatedField(queryset=Supplier.objects.all())
+    manager_name = serializers.CharField(write_only=True)
 
     class Meta:
         model = Order
         fields = [
             'supplier',
+            'manager_name',
             'order_date',
             'expected_delivery_date',
             'status',
@@ -77,12 +82,22 @@ class OrderWriteSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')
-        order = Order.objects.create(**validated_data)
+        manager_name = validated_data.pop('manager_name')
+
+        try:
+            manager = User.objects.get(first_name=manager_name)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({
+                "manager_name": f"'{manager_name}'이라는 이름을 가진 사용자가 존재하지 않습니다."
+            })
+
+        order = Order.objects.create(manager=manager, **validated_data)
 
         for item_data in items_data:
             item = OrderItemWriteSerializer().create(item_data)
             item.order = order
             item.save()
+
         return order
 
 class OrderCompactSerializer(serializers.ModelSerializer):

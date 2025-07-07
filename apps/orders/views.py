@@ -27,9 +27,10 @@ class OrderListView(APIView):
         operation_description="주문을 생성합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["supplier", "order_date", "expected_delivery_date", "status", "items"],
+            required=["supplier", "manager_name", "order_date", "expected_delivery_date", "status", "items"],
             properties={
                 "supplier": openapi.Schema(type=openapi.TYPE_INTEGER, example=1),
+                "manager_name": openapi.Schema(type=openapi.TYPE_STRING, example="유시진"),
                 "order_date": openapi.Schema(type=openapi.TYPE_STRING, format="date", example="2025-07-07"),
                 "expected_delivery_date": openapi.Schema(type=openapi.TYPE_STRING, format="date", example="2025-07-09"),
                 "status": openapi.Schema(type=openapi.TYPE_STRING, example="PENDING"),
