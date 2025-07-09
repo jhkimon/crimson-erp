@@ -168,7 +168,7 @@ class LoginView(APIView):
         user = authenticate(username=username, password=password)
 
         if user is not None:
-            if user.role == "STAFF" and user.status != "approved":
+            if user.role == "STAFF" and user.status.upper() != "APPROVED":
                 return Response({"error": "승인되지 않은 STAFF 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
 
             refresh = RefreshToken.for_user(user)
