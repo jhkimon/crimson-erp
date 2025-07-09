@@ -11,14 +11,14 @@ class SupplierOptionSerializer(serializers.ModelSerializer):
 
 # Supplier <> Variant Mapping Table 읽기용
 class SupplierVariantDetailSerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(source='variant.id')
+    variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
     option = serializers.CharField(source='variant.option')
     stock = serializers.IntegerField(source='variant.stock')
     name = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierVariant
-        fields = ['id', 'option', 'stock', 'name', 'cost_price', 'is_primary']
+        fields = ['variant_code', 'option', 'stock', 'name', 'cost_price', 'is_primary']
 
     def get_name(self, obj):
         return obj.variant.product.name

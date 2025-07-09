@@ -144,7 +144,11 @@ class ProductVariantCSVUploadView(APIView):
                     )
 
                     # 품목 생성 or 업데이트
-                    variant = ProductVariant.objects.filter(variant_code=variant_code).first()
+                    if option == "기본":
+                        variant = ProductVariant.objects.filter(product=product, option="기본").first()
+                    else:
+                        variant = ProductVariant.objects.filter(variant_code=variant_code).first()
+
 
                     if variant:
                         # 업데이트
