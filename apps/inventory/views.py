@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -293,4 +294,60 @@ class ProductVariantDetailView(APIView):
             return Response({"error": "상세 정보가 존재하지 않습니다"}, status=status.HTTP_404_NOT_FOUND)
 
         variant.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class InventoryItemMergeView(APIView):
+    """
+    POST: 동일 상품이지만 id가 다른 상품을 하나로 병합용
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="상품 코드 병합",
+        operation_description="여러 상품(source_ids)을 target_id로 병합합니다. 병합된 상품은 is_active=False 처리됩니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["target_id", "source_ids"],
+            properties={
+                "target_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="최종 남길 상품의 ID"),
+                "source_ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                    description="합칠(비활성 처리할) 상품 ID 리스트"
+                )
+            }
+        ),
+        responses={204: "Merge completed.",
+                   400: "Bad Request", 404: "Not Found"}
+    )
+    def post(self, request):
+        target_id = request.data.get("target_id")  # 병합 대상 상품 id (최종적으로 남는 id)
+        # 병합 필요 상품 id (fade out되는 id)
+        source_ids = request.data.get("source_ids")
+
+        if not isinstance(source_ids, list) or not target_id:
+            return Response({"error": "target_id와 source_ids(리스트)를 모두 제공해야 합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure target exists
+        try:
+            target = InventoryItem.objects.get(id=target_id, is_active=True)
+        except InventoryItem.DoesNotExist:
+            return Response({"error": "target_id에 해당하는 상품이 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Exclude target from sources if accidentally included
+        source_ids = [sid for sid in source_ids if sid != target_id]
+        sources = InventoryItem.objects.filter(
+            id__in=source_ids, is_active=True)
+        if not sources:
+            return Response({"error": "합칠 source_ids에 유효한 상품이 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Execute merge within transaction
+        with transaction.atomic():
+            # 1) Move all variants of source items to target
+            ProductVariant.objects.filter(product_id__in=[s.id for s in sources])\
+                .update(product=target)
+            # 2) Soft-delete source items
+            sources.update(is_active=False)
+
         return Response(status=status.HTTP_204_NO_CONTENT)
