@@ -6,6 +6,7 @@ class InventoryItem(models.Model):
         max_length=50, unique=True, default="P00000")
     name = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)  # merge 작업용
 
     class Meta:
         db_table = "products"
