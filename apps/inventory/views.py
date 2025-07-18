@@ -5,8 +5,8 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import InventoryItem, ProductVariant
-from .serializers import InventoryItemSerializer, ProductVariantSerializer
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from .serializers import InventoryItemSerializer, ProductVariantSerializer, InventoryAdjustmentSerializer
 
 # 재고 전체 목록 작업 (조회 및 추가)
 
@@ -351,3 +351,61 @@ class InventoryItemMergeView(APIView):
             sources.update(is_active=False)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class InventoryAdjustmentListCreateView(APIView):
+    """
+    GET: 특정 변형의 재고 조정 이력 조회
+    POST: 새로운 재고 조정 레코드 생성
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="재고 조정 이력 조회",
+        operation_description="특정 variant_id에 해당하는 재고 조정 이력을 조회합니다.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="product_id", in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER, description="상품 ID"
+            ),
+            openapi.Parameter(
+                name="variant_id", in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER, description="variant ID"
+            )
+        ],
+        responses={200: InventoryAdjustmentSerializer(
+            many=True), 404: "Not Found"}
+    )
+    def get(self, request, product_id: int, variant_id: int):
+        adjustments = InventoryAdjustment.objects.filter(variant_id=variant_id)
+        serializer = InventoryAdjustmentSerializer(adjustments, many=True)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        operation_summary="재고 조정 생성",
+        operation_description="재고가 일치하지 않을 때 임시로 조정값을 기록합니다.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="product_id", in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER, description="상품 ID"
+            ),
+            openapi.Parameter(
+                name="variant_id", in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER, description="variant ID"
+            )
+        ],
+        request_body=InventoryAdjustmentSerializer,
+        responses={201: InventoryAdjustmentSerializer, 400: "Bad Request"}
+    )
+    def post(self, request, product_id: int, variant_id: int):
+        data = request.data.copy()
+        data['variant_id'] = variant_id
+        serializer = InventoryAdjustmentSerializer(data=data)
+        if serializer.is_valid():
+            adjustment = serializer.save()
+            # variant 모델의 adjustment 필드 업데이트
+            variant = adjustment.variant
+            variant.adjustment += adjustment.delta
+            variant.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

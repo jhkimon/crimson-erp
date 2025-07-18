@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import InventoryItem, ProductVariant
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
@@ -50,3 +50,19 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         if product:
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
+
+
+class InventoryAdjustmentSerializer(serializers.ModelSerializer):
+    variant_id = serializers.PrimaryKeyRelatedField(
+        queryset=ProductVariant.objects.all(),
+        source='variant',
+        write_only=True
+    )
+    variant = ProductVariantSerializer(read_only=True)
+
+    class Meta:
+        model = InventoryAdjustment
+        fields = [
+            'id', 'variant', 'variant_id', 'delta', 'reason', 'created_by', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'variant']
