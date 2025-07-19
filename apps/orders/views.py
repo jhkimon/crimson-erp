@@ -12,7 +12,7 @@ from apps.inventory.models import ProductVariant
 from .serializers import OrderWriteSerializer, OrderReadSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
+from apps.utils.email_utils import send_order_created_email, send_order_approved_email
 
 class OrderListView(APIView):
     permission_classes = [AllowAny]
@@ -87,6 +87,7 @@ class OrderListView(APIView):
             order = serializer.save()
             # 응답은 읽기용으로 직렬화
             read_serializer = OrderReadSerializer(order)
+            send_order_created_email(order)
             return Response(read_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -167,6 +168,11 @@ class OrderDetailView(APIView):
                 "error": "이미 동일한 상태입니다. 상태를 변경하려면 다른 값을 입력하세요.",
                 "status": new_status
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+
+        # APPROVED 로 변경시.
+        if previous_status != "APPROVED" and new_status == "APPROVED":
+            send_order_approved_email(order)
     
 
         # 완료 X -> COMPLETED (재고 증가)
