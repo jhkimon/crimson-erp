@@ -12,7 +12,7 @@ class InventoryItem(models.Model):
         help_text="상품 카테고리 (예: 문구, 도서, 의류 등)"
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    is_active = models.BooleanField(default=True)  # merge 작업용
+    is_active = models.BooleanField(default=True)  # 병합 후 비활성화 처리용
 
     class Meta:
         db_table = "products"

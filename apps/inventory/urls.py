@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import InventoryListView, ProductVariantDetailView, InventoryItemView, ProductVariantCreateView, InventoryItemMergeView, InventoryAdjustmentListCreateView
+from .views import InventoryListView, ProductVariantDetailView, InventoryItemView, ProductVariantCreateView, InventoryItemMergeView, InventoryAdjustmentListCreateView, InventoryExportView
 
 urlpatterns = [
     path("items/", InventoryListView.as_view(),
@@ -19,5 +19,10 @@ urlpatterns = [
         InventoryAdjustmentListCreateView.as_view(),
         name="variant-adjustment-list"
         # api/v1/inventory/items/{product_id}/variants/{variant_id}/adjustments/
+    ),
+    path(
+        'items/export/',
+        InventoryExportView.as_view(),  # api/v1/inventory/items/export/
+        name='inventory-export'
     ),
 ]

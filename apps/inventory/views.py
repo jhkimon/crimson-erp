@@ -1,4 +1,7 @@
+import io
 from django.db import transaction
+from django.http import HttpResponse
+import openpyxl
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -296,6 +299,8 @@ class ProductVariantDetailView(APIView):
         variant.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+# 동일 상품 다른 id 하나로 병합하기
+
 
 class InventoryItemMergeView(APIView):
     """
@@ -351,6 +356,8 @@ class InventoryItemMergeView(APIView):
             sources.update(is_active=False)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+# 상품 재고 임시 조정용 값 생성하기
 
 
 class InventoryAdjustmentListCreateView(APIView):
@@ -409,3 +416,54 @@ class InventoryAdjustmentListCreateView(APIView):
             variant.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# 재고 요약 정보 엑셀로 제공하기
+class InventoryExportView(APIView):
+    """
+    GET: 전체 재고 관리 요약을 엑셀(.xlsx) 파일로 다운로드
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="재고 관리 엑셀 다운로드",
+        operation_description="전체 InventoryItem과 관련 Variants 정보를 엑셀 파일로 제공합니다.",
+        responses={
+            200: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+    )
+    def get(self, request):
+        # 워크북 생성
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Inventory Summary'
+
+        # 헤더 작성
+        headers = [
+            'Product ID', 'Product Code', 'Name', 'Category',
+            'Variant ID', 'Variant Code', 'Option',
+            'Stock', 'Adjustment', 'Price'
+        ]
+        ws.append(headers)
+
+        # 데이터 rows
+        for item in InventoryItem.objects.filter(is_active=True):
+            for var in item.variants.all():
+                row = [
+                    item.id, item.product_code, item.name, item.category,
+                    var.id, var.variant_code, var.option,
+                    var.stock, var.adjustment, var.price
+                ]
+                ws.append(row)
+
+        # 메모리 버퍼에 저장
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        # 응답
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename=inventory_summary.xlsx'
+        return response
