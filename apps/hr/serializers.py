@@ -39,12 +39,11 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         result = []
         qs = obj.vacation_requests.filter(status=status)
         for req in qs:
-            if req.leave_type == 'VACATION':
-                result.append(f"{req.start_date} ~ {req.end_date}")
-            elif req.leave_type == 'HALF_DAY_AM':
-                result.append(f"{req.start_date} 오전 반차")
-            elif req.leave_type == 'HALF_DAY_PM':
-                result.append(f"{req.start_date} 오후 반차")
+            result.append({
+                "start_date": req.start_date,
+                "end_date": req.end_date,
+                "leave_type": req.leave_type
+            })
         return result
 
 class EmployeeUpdateSerializer(serializers.ModelSerializer):
