@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     "corsheaders",
     'drf_yasg',
+    'django_filters',
     "apps.hr",
     "apps.inventory",
     "apps.authentication",
@@ -68,12 +69,15 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = 'hr.Employee'
 
 REST_FRAMEWORK = {
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'], # 필터
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT만 사용
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',  # 기본적으로 인증 필요
     ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,  # 한 페이지당 항목 수
 }
 
 SWAGGER_SETTINGS = {

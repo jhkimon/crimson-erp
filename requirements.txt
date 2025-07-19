@@ -44,3 +44,6 @@ factory-boy>=3.3.0  # 테스트 데이터 생성
 
 # Docker 지원
 dj-database-url>=2.1.0  # DATABASE_URL 환경 변수 지원
+
+# 필터
+django-filter==25.1
