@@ -1,5 +1,7 @@
 from rest_framework.views import APIView
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
@@ -9,6 +11,11 @@ from drf_yasg import openapi
 from .models import InventoryItem, ProductVariant
 from .serializers import ProductOptionSerializer, ProductVariantSerializer, ProductVariantFullUpdateSerializer, InventoryItemWithVariantsSerializer, ProductVariantCreateSerializer
 import pandas as pd
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import OrderingFilter
+from .filters import ProductVariantFilter
+
+
 
 # 빠른 값 조회용 엔드포인트
 class ProductOptionListView(APIView):
@@ -24,28 +31,28 @@ class ProductOptionListView(APIView):
         serializer = ProductOptionSerializer(products, many=True)
         return Response(serializer.data)
     
-# 재고 전체 조회
-class InventoryListView(APIView):
-    """
-    GET: 전체 제품 목록 조회
-    POST: 새로운 제품 추가
-    """
+# # 재고 전체 조회
+# class InventoryListView(APIView):
+#     """
+#     GET: 전체 제품 목록 조회
+#     POST: 새로운 제품 추가
+#     """
 
-    permission_classes = [AllowAny]
-    # 전체 목록 조회
+#     permission_classes = [AllowAny]
+#     # 전체 목록 조회
 
-    @swagger_auto_schema(
-        operation_summary="전체 제품 목록 조회 (방패필통)",
-        operation_description="현재 등록된 모든 제품 목록을 조회합니다.",
-        responses={200: InventoryItemWithVariantsSerializer(many=True)}
-    )
-    def get(self, request):
-        items = InventoryItem.objects.all()
-        serializer = InventoryItemWithVariantsSerializer(items, many=True)
-        return Response(serializer.data)
+#     @swagger_auto_schema(
+#         operation_summary="전체 제품 목록 조회 (방패필통)",
+#         operation_description="현재 등록된 모든 제품 목록을 조회합니다.",
+#         responses={200: InventoryItemWithVariantsSerializer(many=True)}
+#     )
+#     def get(self, request):
+#         items = InventoryItem.objects.all()
+#         serializer = InventoryItemWithVariantsSerializer(items, many=True)
+#         return Response(serializer.data)
 
 
-# 일부 조회
+# 일부 조회 (Product ID 기준)
 class InventoryItemView(APIView):
     '''
     GET: 특정 상품 기본 정보 조회 (상품코드, 상품명, 생성일자)
@@ -183,10 +190,17 @@ class ProductVariantCSVUploadView(APIView):
             "errors": errors
         }, status=status.HTTP_200_OK)
 
-# 상품 상세 정보 Create
-class ProductVariantCreateView(APIView):
+# 상품 상세 정보 관련 View
+class ProductVariantView(APIView):
+    '''
+    POST : 상품 상세 추가
+    GET : 쿼리 파라미터 기반 Product Variant 조회
+    '''
     permission_classes = [AllowAny]
-
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = ProductVariantFilter
+    ordering_fields = ["stock", "price"]
+    
     def generate_variant_code(self, base_code):
         existing_codes = ProductVariant.objects.filter(
             variant_code__startswith=base_code
@@ -228,7 +242,34 @@ class ProductVariantCreateView(APIView):
             return Response(ProductVariantSerializer(serializer.instance).data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    @swagger_auto_schema(
+        operation_summary="상품 상세 목록 조회 (필터/정렬/페이지네이션 지원)",
+        manual_parameters=[
+            openapi.Parameter('stock_lt', openapi.IN_QUERY, description='재고 수량 미만', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('stock_gt', openapi.IN_QUERY, description='재고 수량 초과', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_min', openapi.IN_QUERY, description='최소 매출', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_max', openapi.IN_QUERY, description='최대 매출', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('page', openapi.IN_QUERY, description= '페이지 번호 (default = 1)', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='정렬 필드 (-price, stock 등)'),
+            openapi.Parameter('product_name',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING,description='상품명 검색 (부분일치)'),
+        ],
+        responses={200: ProductVariantSerializer(many=True)}
+    )
+    def get(self, request):
+            queryset = ProductVariant.objects.select_related("product").all()
+
+            # filtering
+            for backend in list(self.filter_backends):
+                queryset = backend().filter_queryset(request, queryset, self)
+
+            # pagination (고정 page_size = 10)
+            paginator = PageNumberPagination()
+            paginator.page_size = 10
+            page = paginator.paginate_queryset(queryset, request, view=self)
+
+            serializer = ProductVariantSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
 
 class ProductVariantDetailView(APIView):
     """

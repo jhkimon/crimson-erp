@@ -106,6 +106,7 @@ class OrderCompactSerializer(serializers.ModelSerializer):
     product_names = serializers.SerializerMethodField()
     supplier = serializers.CharField(source='supplier.name', read_only=True)
     manager = serializers.CharField(source='manager.first_name', read_only=True)
+    expected_delivery_date = serializers.DateField(read_only=True)
 
     class Meta:
         model = Order
@@ -116,6 +117,7 @@ class OrderCompactSerializer(serializers.ModelSerializer):
             'status',
             'note',
             'order_date',
+            'expected_delivery_date',
             'total_quantity',
             'total_price',
             'product_names'

@@ -92,8 +92,10 @@ def reset_data():
     """기존 데이터 삭제 (FK 관계 순서 고려)"""
     print_status("기존 데이터를 삭제합니다...", "🔄")
     Order.objects.all().delete()
+    SupplierVariant.objects.all().delete()
     ProductVariant.objects.all().delete()
     InventoryItem.objects.all().delete()
+    Supplier.objects.all().delete()
     Employee.objects.all().delete()
     print_status("기존 데이터 삭제 완료", "✓")
 
