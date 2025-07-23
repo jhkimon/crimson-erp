@@ -27,8 +27,21 @@ SECRET_KEY = 'django-insecure-k*2r9%e1-eothsyy!ncymqtwb2$(i=8s9r899x5&u5zywar=)i
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ['*']
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",  # 필요 시 추가
+]
+CORS_ALLOW_HEADERS = [
+    "authorization",
+    "content-type",
+    "accept",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
 
 # Application definition
 
@@ -43,34 +56,47 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    "corsheaders",
     'drf_yasg',
+    'django_filters',
+    "apps.dashboard",
     "apps.hr",
     "apps.inventory",
     "apps.authentication",
     "apps.orders",
+    'apps.supplier',
 ]
 
+AUTH_USER_MODEL = 'hr.Employee'
+
 REST_FRAMEWORK = {
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'], # 필터
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT만 사용
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',  # 기본적으로 인증 필요
     ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,  # 한 페이지당 항목 수
 }
 
 SWAGGER_SETTINGS = {
+    # 1) 스킴 정의 키 이름 통일: 'Bearer' 대신 'BearerAuth' 권장
     'SECURITY_DEFINITIONS': {
-        'Bearer': {
+        'BearerAuth': {
             'type': 'apiKey',
             'in': 'header',
             'name': 'Authorization',
-            'description': (
-                "JWT Authorization header using the Bearer scheme. "
-                "Example: 'Bearer {token}'"
-            ),
+            'description': "JWT를 'Bearer <token>' 형태로 입력",
         }
     },
+    # 2) 전역 기본 보안 스킴으로 지정
+    'DEFAULT_SECURITY': [
+        {'BearerAuth': []}
+    ],
+    # 3) 세션 인증 UI 끄기 (선택)
+    'USE_SESSION_AUTH': False,
 }
 
 # JWT Refresh Token 블랙리스트 설정
@@ -83,7 +109,9 @@ SIMPLE_JWT = {
 }
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
+    "corsheaders.middleware.CorsMiddleware",  # 가장 먼저
+    "django.middleware.common.CommonMiddleware",
+     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -179,3 +207,7 @@ STATIC_ROOT = BASE_DIR / "static"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# settings.py
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

@@ -1,7 +1,12 @@
 ﻿# Django basic package
 Django>=4.2,<5.0
 djangorestframework>=3.14.0
+<<<<<<< HEAD
 django-environ>=0.10.0  
+=======
+django-environ>=0.10.0  # 환경 변수 관리
+python-decouple>=3.8  # 환경 변수 관리 (대안)
+>>>>>>> main
 
 # Database
 psycopg2-binary>=2.9.9  # PostgreSQL driver
@@ -33,10 +38,25 @@ uvicorn>=0.27.1  # ASGI (FastAPI, WebSocket)
 python-dotenv>=1.0.1  # env 
 ipython>=8.18.1  # Django shell
 
+<<<<<<< HEAD
 # test and debugging
+=======
+# 더미 데이터 생성
+Faker>=22.0.0  # 더미데이터 생성 라이브러리 (한국어 지원)
+
+# 테스트 및 디버깅
+>>>>>>> main
 pytest>=8.0.2
 pytest-django>=4.8.0
 factory-boy>=3.3.0  # test data
 
+<<<<<<< HEAD
 # Docker 
 dj-database-url>=2.1.0  # DATABASE_URL
+=======
+# Docker 지원
+dj-database-url>=2.1.0  # DATABASE_URL 환경 변수 지원
+
+# 필터
+django-filter==25.1
+>>>>>>> main

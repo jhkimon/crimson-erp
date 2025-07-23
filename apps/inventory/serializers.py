@@ -1,6 +1,12 @@
 from rest_framework import serializers
-from .models import InventoryItem, ProductVariant, InventoryAdjustment, SalesChannel, SalesTransaction, SalesTransactionItem, StockReservation
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from apps.supplier.models import SupplierVariant, Supplier
 
+
+class ProductOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = ['id', 'product_id', 'name']
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -10,187 +16,205 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 
-    inventory_item = InventoryItemSerializer(source='product', read_only=True)
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=InventoryItem.objects.all(),
-        source='product',
-        write_only=True
-    )
+    suppliers = serializers.SerializerMethodField()
+    cost_price = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    product_id = serializers.CharField(source='product.product_id', read_only=True)
+    stock = serializers.IntegerField(read_only=True)
+    sales = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariant
         fields = [
-            'id',                   # variant_id
-            'inventory_item',       # 품목명 및 품목코드
             'product_id',    # product_id
+            'name',             # 상품명
+            'category',         # 상품 카테고리
             'variant_code',         # variant_code
             'option',               # 옵션
             'stock',                # 재고량
             'price',                # 가격
-            'created_at',           # 생성일시
-            'updated_at'            # 수정일시
+            'min_stock',             # 최소재고
+            'description',          # 상품설명
+            'memo',                  # 메모
+            'cost_price',           # 원가
+            'order_count',          # 판매수량
+            'return_count',          # 환불수량
+            'sales',
+            'suppliers'             # 공급자명
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-    # 수정 시 기본 정보(inventory_item)는 가져오지 않기
 
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get('request')
-        # POST, PUT, PATCH 요청 시에는 기본 정보 필드 입력 제거거
+        # POST, PUT, PATCH 요청 시에는 기본 정보 필드 입력 제거
         if request and request.method in ['POST', 'PUT', 'PATCH']:
             fields.pop('inventory_item', None)
             fields.pop('product_id', None)
         return fields
 
     def create(self, validated_data):
-        # POST 요청 시, 외래키(Product)는 get_fields()에서 제거되어 validated_data에 포함되어 있지 않습니다.
-        # 대신 뷰에서 전달한 context에서 InventoryItem 객체를 가져와 넣어줍니다.
         product = self.context.get('product')
         if product:
             validated_data['product'] = product
         return ProductVariant.objects.create(**validated_data)
+    def get_suppliers(self, obj):
+        variants = SupplierVariant.objects.select_related("supplier").filter(variant=obj)
+        return [
+            {
+                "name": sv.supplier.name,
+                "is_primary": sv.is_primary,
+                "cost_price": sv.cost_price,
+            }
+            for sv in variants
+        ]
+    def get_cost_price(self, obj):
+        supplier_variants = SupplierVariant.objects.filter(variant=obj)
+        prices = [sv.cost_price for sv in supplier_variants if sv.cost_price is not None]
+        if not prices:
+            return None
+        return sum(prices) // len(prices)
+    
+    def get_sales(self, obj):
+        return obj.price * (obj.order_count - obj.return_count)
+    
+    def get_name(self, obj):
+        return obj.product.name if obj.product else None
+    
+    def get_category(self, obj):
+        return obj.product.category if obj.product else None
 
 
+# 간단한 응답용 시리얼라이저들
+    
+class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
+    variants = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InventoryItem
+        fields = ['product_id', 'name', 'variants']
+
+    def get_variants(self, obj):
+        active_variants = obj.variants.filter(is_active=True)
+        return ProductVariantSerializer(active_variants, many=True, context=self.context).data
+
+###### Create Update Delete를 위한 Serializer
+class SupplierVariantUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    cost_price = serializers.IntegerField()
+    is_primary = serializers.BooleanField()
+
+    def validate_name(self, value):
+        from apps.supplier.models import Supplier
+        try:
+            return Supplier.objects.get(name=value)
+        except Supplier.DoesNotExist:
+            raise serializers.ValidationError(f"공급자 '{value}'는 존재하지 않습니다.")
+
+class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
+    product_id = serializers.CharField(source="product.product_id")
+    name = serializers.CharField(source="product.name")
+    suppliers = SupplierVariantUpdateSerializer(many=True, required=False)
+    category = serializers.CharField(write_only=True, required=False) # write-only 입력용
+    category_name = serializers.CharField(source="product.category.name", read_only=True) # read-only 출력용
+
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'product_id', 'variant_code', 'category', 'category_name', 'option', 'stock', 'price',
+            'min_stock', 'description', 'memo',
+            'name', 'suppliers'
+        ]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get('request')
+
+        # POST나 PATCH 요청 시 variant_code 제거
+        if request and request.method in ['POST', 'PATCH']:
+            fields.pop('variant_code', None)
+        return fields
+
+    def create(self, validated_data):
+        product = self.context.get('product')
+        validated_data.pop('product', None)
+
+        # category 처리
+        category_value = validated_data.pop('category', None)
+        if category_value:
+            product.category = category_value
+            product.save()
+
+        # suppliers 분리
+        suppliers_data = validated_data.pop('suppliers', [])
+
+        # variant 생성
+        variant = ProductVariant.objects.create(product=product, **validated_data)
+
+        # suppliers 연결
+        for s in suppliers_data:
+            SupplierVariant.objects.create(
+                variant=variant,
+                supplier=s['name'],
+                cost_price=s['cost_price'],
+                is_primary=s.get('is_primary', False),
+            )
+        return variant
+    
+    def update(self, instance, validated_data):
+        # Update ProductVariant fields
+        product_data = validated_data.pop('product', {})
+        if 'name' in product_data:
+            instance.product.name = product_data['name']
+            instance.product.save()
+
+        # 카테고리 업데이트
+        category_value = validated_data.pop('category', None)
+        if category_value:
+            instance.product.category = category_value
+
+        suppliers_data = validated_data.pop('suppliers', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update SupplierVariants (optional)
+        if suppliers_data is not None:
+            # 기존 관계 제거
+            SupplierVariant.objects.filter(variant=instance).delete()
+
+            # 새로 추가
+            for s in suppliers_data:
+                SupplierVariant.objects.create(
+                    variant=instance,
+                    supplier=s['name'],
+                    cost_price=s['cost_price'],
+                    is_primary=s.get('is_primary', False),
+                )
+        return instance
+    
+# Swagger용
+class ProductVariantCreateSerializer(ProductVariantFullUpdateSerializer):
+    class Meta(ProductVariantFullUpdateSerializer.Meta):
+        fields = [f for f in ProductVariantFullUpdateSerializer.Meta.fields if f != 'variant_code']
+
+# 재고조정용 Serailizer
 class InventoryAdjustmentSerializer(serializers.ModelSerializer):
-    variant_id = serializers.PrimaryKeyRelatedField(
-        queryset=ProductVariant.objects.all(),
-        source='variant',
-        write_only=True
-    )
-    variant = ProductVariantSerializer(read_only=True)
+    variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
+    product_id = serializers.CharField(source='variant.product.product_id', read_only=True)
+    product_name = serializers.CharField(source='variant.product.name', read_only=True)
 
     class Meta:
         model = InventoryAdjustment
         fields = [
-            'id', 'variant', 'variant_id', 'delta', 'reason', 'created_by', 'created_at'
+            'id',
+            'variant_code',
+            'product_id',
+            'product_name',
+            'delta',
+            'reason',
+            'created_by',
+            'created_at',
         ]
-        read_only_fields = ['id', 'created_at', 'variant']
-
-
-class SalesChannelSerializer(serializers.ModelSerializer):
-    channel_type_display = serializers.CharField(
-        source='get_channel_type_display', read_only=True)
-
-    class Meta:
-        model = SalesChannel
-        fields = [
-            'id', 'name', 'channel_type', 'channel_type_display',
-            'api_key', 'webhook_url', 'is_active', 'created_at'
-        ]
-        read_only_fields = ['created_at']
-        extra_kwargs = {
-            'api_key': {'write_only': True}  # 보안을 위해 읽기 시 숨김
-        }
-
-
-class SalesTransactionItemSerializer(serializers.ModelSerializer):
-    variant_code = serializers.CharField(
-        source='variant.variant_code', read_only=True)
-    variant_option = serializers.CharField(
-        source='variant.option', read_only=True)
-    product_name = serializers.CharField(
-        source='variant.product.name', read_only=True)
-
-    class Meta:
-        model = SalesTransactionItem
-        fields = [
-            'id', 'variant', 'variant_code', 'variant_option', 'product_name',
-            'quantity', 'unit_price', 'total_price',
-            'is_stock_reserved', 'is_stock_deducted', 'created_at'
-        ]
-        read_only_fields = ['created_at', 'total_price']
-
-
-class SalesTransactionSerializer(serializers.ModelSerializer):
-    items = SalesTransactionItemSerializer(many=True, read_only=True)
-    channel_name = serializers.CharField(source='channel.name', read_only=True)
-    channel_type = serializers.CharField(
-        source='channel.channel_type', read_only=True)
-    status_display = serializers.CharField(
-        source='get_status_display', read_only=True)
-
-    class Meta:
-        model = SalesTransaction
-        fields = [
-            'id', 'external_order_id', 'channel', 'channel_name', 'channel_type',
-            'status', 'status_display', 'customer_name', 'customer_phone',
-            'total_amount', 'created_at', 'updated_at', 'items'
-        ]
-        read_only_fields = ['created_at', 'updated_at']
-
-
-class StockReservationSerializer(serializers.ModelSerializer):
-    variant_code = serializers.CharField(
-        source='variant.variant_code', read_only=True)
-    variant_option = serializers.CharField(
-        source='variant.option', read_only=True)
-    transaction_order_id = serializers.CharField(
-        source='transaction_item.transaction.external_order_id', read_only=True)
-
-    class Meta:
-        model = StockReservation
-        fields = [
-            'id', 'variant', 'variant_code', 'variant_option',
-            'transaction_item', 'transaction_order_id',
-            'reserved_quantity', 'expires_at', 'is_confirmed',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = ['created_at', 'updated_at']
-
-
-# 온라인 POS 연동용 특별 시리얼라이저들
-
-class OnlinePOSOrderItemSerializer(serializers.Serializer):
-    """온라인 POS에서 받을 주문 상품 데이터"""
-    variant_code = serializers.CharField(max_length=50)
-    quantity = serializers.IntegerField(min_value=1)
-    unit_price = serializers.IntegerField(min_value=0)
-
-
-class OnlinePOSOrderSerializer(serializers.Serializer):
-    """온라인 POS에서 받을 주문 데이터"""
-    external_order_id = serializers.CharField(max_length=100)
-    channel_api_key = serializers.CharField(max_length=255)
-    customer_name = serializers.CharField(
-        max_length=100, required=False, allow_blank=True)
-    customer_phone = serializers.CharField(
-        max_length=20, required=False, allow_blank=True)
-    items = OnlinePOSOrderItemSerializer(many=True)
-
-    def validate_items(self, value):
-        """주문 상품이 비어있지 않은지 확인"""
-        if not value:
-            raise serializers.ValidationError("주문 상품이 비어있습니다.")
-        return value
-
-
-class StockCheckSerializer(serializers.Serializer):
-    """재고 확인용 시리얼라이저"""
-    variant_code = serializers.CharField(max_length=50)
-    requested_quantity = serializers.IntegerField(min_value=1)
-
-
-class BulkStockCheckSerializer(serializers.Serializer):
-    """대량 재고 확인용 시리얼라이저"""
-    items = StockCheckSerializer(many=True)
-
-
-# 간단한 응답용 시리얼라이저들
-class SimpleProductVariantSerializer(serializers.ModelSerializer):
-    """간단한 상품 변형 정보만 반환"""
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    available_stock = serializers.ReadOnlyField()
-
-    class Meta:
-        model = ProductVariant
-        fields = ['variant_code', 'option',
-                  'product_name', 'price', 'available_stock']
-
-
-class StockStatusSerializer(serializers.Serializer):
-    """재고 상태 응답용"""
-    variant_code = serializers.CharField()
-    available = serializers.BooleanField()
-    available_stock = serializers.IntegerField()
-    message = serializers.CharField(required=False)
+        read_only_fields = fields
