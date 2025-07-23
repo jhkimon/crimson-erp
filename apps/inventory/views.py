@@ -1,35 +1,40 @@
 import io
-from django.db import transaction
-from django.http import HttpResponse
-import openpyxl
-from django.utils import timezone
 from datetime import timedelta
-from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView
-from rest_framework.response import Response
-from rest_framework.pagination import PageNumberPagination
-from rest_framework import status, generics
-from rest_framework.permissions import AllowAny
-from drf_yasg.utils import swagger_auto_schema
-from rest_framework.parsers import MultiPartParser
-from django.db import transaction
-from drf_yasg import openapi
-from .models import InventoryItem, ProductVariant, InventoryAdjustment
-from .serializers import (
-    ProductVariantSerializer, 
-    ProductOptionSerializer, 
-    ProductVariantSerializer, 
-    ProductVariantFullUpdateSerializer, 
-    InventoryItemWithVariantsSerializer, 
-    ProductVariantCreateSerializer, 
-    InventoryAdjustmentSerializer
-)
 
 import pandas as pd
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter
-from .filters import ProductVariantFilter, InventoryAdjustmentFilter
+import openpyxl, xlrd
 
+from django.db import transaction
+from django.http import HttpResponse
+from django.utils import timezone
+from django.db.models import F, Sum, ExpressionWrapper, IntegerField
+
+from rest_framework import status, generics
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny
+from rest_framework.parsers import MultiPartParser
+
+from rest_framework.generics import ListAPIView
+from rest_framework.filters import OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from .serializers import (
+    ProductOptionSerializer,
+    ProductVariantSerializer,
+    ProductVariantFullUpdateSerializer,
+    InventoryItemWithVariantsSerializer,
+    ProductVariantCreateSerializer,
+    InventoryAdjustmentSerializer
+)
+from apps.orders.models import OrderItem
+from apps.supplier.models import SupplierVariant
+from .filters import ProductVariantFilter, InventoryAdjustmentFilter
 
 
 # 빠른 값 조회용 엔드포인트
@@ -75,8 +80,7 @@ class InventoryItemView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
 
-# 상품 csv 업로드 Create
-
+# 상품 CSV 업로드
 class ProductVariantCSVUploadView(APIView):
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser]
@@ -89,6 +93,14 @@ class ProductVariantCSVUploadView(APIView):
             if candidate not in existing:
                 return candidate
             suffix += 1
+
+    def infer_sheet_type(self, df: pd.DataFrame) -> str:
+        if "상품 품목코드" in df.columns and "옵션" in df.columns:
+            return "variant_detail"
+        elif "바코드" in df.columns and "총매출" in df.columns:
+            return "sales_summary"
+        else:
+            return "unknown"
 
     @swagger_auto_schema(
         operation_summary="상품 XLSX 일괄 업로드",
@@ -104,16 +116,31 @@ class ProductVariantCSVUploadView(APIView):
         ],
         responses={200: "성공", 400: "파일 에러 또는 유효성 오류"}
     )
+
     def post(self, request):
         excel_file = request.FILES.get("file")
         if not excel_file:
             return Response({"error": "파일이 첨부되지 않았습니다."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            df = pd.read_excel(excel_file)
+            filename = excel_file.name
+            if filename.endswith(".xls"):
+                df = pd.read_excel(excel_file, engine="xlrd")
+            else:  # 기본은 .xlsx
+                df = pd.read_excel(excel_file, engine="openpyxl")
         except Exception as e:
             return Response({"error": f"엑셀 파일을 읽을 수 없습니다: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
+        sheet_type = self.infer_sheet_type(df)
+
+        if sheet_type == "variant_detail":
+            return self.process_variant_detail(df)
+        elif sheet_type == "sales_summary":
+            return self.process_sales_summary(df)
+        else:
+            return Response({"error": "파일 형식을 인식할 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    def process_variant_detail(self, df):
         required_cols = ["상품코드", "상품명", "상품 품목코드", "옵션", "판매가", "재고", "판매수량", "환불수량"]
         for col in required_cols:
             if col not in df.columns:
@@ -138,21 +165,17 @@ class ProductVariantCSVUploadView(APIView):
                     delta_order = int(row["판매수량"]) if pd.notnull(row["판매수량"]) else 0
                     delta_return = int(row["환불수량"]) if pd.notnull(row["환불수량"]) else 0
 
-                    # 상품 생성 또는 가져오기
                     product, _ = InventoryItem.objects.get_or_create(
                         product_id=product_id,
                         defaults={"name": product_name}
                     )
 
-                    # 품목 생성 or 업데이트
                     if option == "기본":
                         variant = ProductVariant.objects.filter(product=product, option="기본").first()
                     else:
                         variant = ProductVariant.objects.filter(variant_code=variant_code).first()
 
-
                     if variant:
-                        # 업데이트
                         variant.option = option
                         variant.price = price
                         variant.stock += delta_stock
@@ -161,7 +184,6 @@ class ProductVariantCSVUploadView(APIView):
                         variant.save()
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
-                        # 생성
                         variant = ProductVariant.objects.create(
                             product=product,
                             variant_code=variant_code,
@@ -172,16 +194,78 @@ class ProductVariantCSVUploadView(APIView):
                             return_count=delta_return
                         )
                         created.append(ProductVariantSerializer(variant).data)
-
                 except Exception as e:
                     errors.append(f"{i+2}행: {str(e)}")
 
         return Response({
+            "type": "variant_detail",
             "created_count": len(created),
             "updated_count": len(updated),
             "created": created,
             "updated": updated,
             "errors": errors
+        }, status=status.HTTP_200_OK)
+
+    def process_sales_summary(self, df):
+        required_cols = ["바코드", "분류명", "상품명", "판매가"]
+        for col in required_cols:
+            if col not in df.columns:
+                return Response({"error": f"필수 컬럼이 누락되었습니다: {col}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        created = []
+        updated = []
+        errors = []
+
+        with transaction.atomic():
+            for i, row in df.iterrows():
+                try:
+                    barcode = str(row["바코드"]).strip()
+                    if not barcode or barcode.lower() == "nan" or barcode == "-":
+                        continue
+
+                    category = str(row["분류명"]).strip() if pd.notnull(row["분류명"]) else "일반"
+                    name = str(row["상품명"]).strip()
+                    price = int(row["판매가"]) if pd.notnull(row["판매가"]) else 0
+                    sales_count = int(row["매출건수"]) if "매출건수" in df.columns and pd.notnull(row["매출건수"]) else 0
+
+                    product, created_flag = InventoryItem.objects.get_or_create(
+                        product_id=barcode,
+                        defaults={"name": name, "category": category}
+                    )
+                    if not created_flag:
+                        product.name = name
+                        product.category = category
+                        product.save()
+
+                    variant, variant_created = ProductVariant.objects.get_or_create(
+                        product=product,
+                        option="기본",
+                        defaults={
+                            "variant_code": self.generate_variant_code(barcode),
+                            "price": price,
+                            "stock": 0,
+                            "order_count": 0,
+                            "return_count": 0
+                        }
+                    )
+                    if variant_created:
+                        created.append(ProductVariantSerializer(variant).data)
+                    else:
+                        variant.price = price
+                        variant.stock -= sales_count # 매출건수만큼 재고 차감
+                        variant.save()
+                        updated.append(ProductVariantSerializer(variant).data)
+
+                except Exception as e:
+                    errors.append(f"{i+2}행: {str(e)}")
+
+        return Response({
+            "type": "sales_summary",
+            "created_count": len(created),
+            "updated_count": len(updated),
+            "errors": errors,
+            "created": created,
+            "updated": updated
         }, status=status.HTTP_200_OK)
 
 # 상품 상세 정보 관련 View
@@ -247,6 +331,7 @@ class ProductVariantView(APIView):
             openapi.Parameter('page', openapi.IN_QUERY, description= '페이지 번호 (default = 1)', type=openapi.TYPE_INTEGER),
             openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='정렬 필드 (-price, stock 등)'),
             openapi.Parameter('product_name',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING,description='상품명 검색 (부분일치)'),
+            openapi.Parameter('category',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING,description='상품 카테고리 (부분일치)'),
         ],
         responses={200: ProductVariantSerializer(many=True)}
     )
@@ -405,7 +490,6 @@ class InventoryItemMergeView(APIView):
         except ProductVariant.DoesNotExist:
             return Response({"error": "target_variant_code에 해당하는 variant가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Exclude target from sources if accidentally included
         source_variant_codes = [
             code for code in source_variant_codes if code != target_variant_code]
         source_variants = ProductVariant.objects.filter(
@@ -429,9 +513,6 @@ class InventoryItemMergeView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _merge_variant_data(self, target_variant, source_variants):
-        """
-        Source variant들의 데이터를 target variant로 병합
-        """
         # 재고 합산
         total_stock = target_variant.stock
         total_reserved_stock = target_variant.reserved_stock
@@ -442,46 +523,15 @@ class InventoryItemMergeView(APIView):
             total_reserved_stock += source_variant.reserved_stock
             total_adjustment += source_variant.adjustment
 
-        # Target variant 업데이트
         target_variant.stock = total_stock
         target_variant.reserved_stock = total_reserved_stock
         target_variant.adjustment = total_adjustment
         target_variant.save()
 
-        # 재고 조정 기록들을 target variant로 이동
-        from .models import InventoryAdjustment
-        InventoryAdjustment.objects.filter(
-            variant__in=source_variants
-        ).update(variant=target_variant)
-
-        # 판매 트랜잭션 아이템들을 target variant로 이동
-        from .models import SalesTransactionItem
-        SalesTransactionItem.objects.filter(
-            variant__in=source_variants
-        ).update(variant=target_variant)
-
-        # 재고 예약들을 target variant로 이동
-        from .models import StockReservation
-        StockReservation.objects.filter(
-            variant__in=source_variants
-        ).update(variant=target_variant)
-
-        # 외래키 참조하는 다른 테이블들을 target variant로 이동
-        from django.db import connection
-        with connection.cursor() as cursor:
-            source_variant_ids = [str(v.id) for v in source_variants]
-            if source_variant_ids:
-                # order_items 테이블 업데이트 (다른 앱에 있는 테이블)
-                cursor.execute(
-                    f"UPDATE order_items SET variant_id = %s WHERE variant_id IN ({','.join(['%s'] * len(source_variant_ids))})",
-                    [target_variant.id] + source_variant_ids
-                )
-
-                # supplier_suppliervariant 테이블 업데이트
-                cursor.execute(
-                    f"UPDATE supplier_suppliervariant SET variant_id = %s WHERE variant_id IN ({','.join(['%s'] * len(source_variant_ids))})",
-                    [target_variant.id] + source_variant_ids
-                )
+        # 관련 객체 업데이트 (ORM 방식)
+        InventoryAdjustment.objects.filter(variant__in=source_variants).update(variant=target_variant)
+        OrderItem.objects.filter(variant__in=source_variants).update(variant=target_variant)
+        SupplierVariant.objects.filter(variant__in=source_variants).update(variant=target_variant)
 
     def _cleanup_orphaned_products(self, source_variants, target_product):
         """
@@ -504,7 +554,7 @@ class InventoryItemMergeView(APIView):
             if not remaining_variants.exists():
                 product.is_active = False
                 product.save()
-    
+        
 ################ 재고 조정
 # 재고 업데이트
 class StockUpdateView(APIView):

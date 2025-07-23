@@ -29,16 +29,16 @@ class ProductVariant(models.Model):
     min_stock = models.PositiveIntegerField(default=0) 
     price = models.PositiveIntegerField(default=0)
 
-    description = models.TextField(blank=True, null=True)
-    memo = models.TextField(blank=True, null=True) 
+    description = models.TextField(blank=True, default="")
+    memo = models.TextField(blank=True, default="")
+    cost_price = models.PositiveIntegerField(default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     # 임시 재고 조정값 (재고 불일치 보정용)
     adjustment = models.IntegerField(
         default=0
     )
-    # 예약된 재고량 (실제 재고에서 차감되지 않은 상태)
-    reserved_stock = models.PositiveIntegerField(default=0)
 
     @property
     def available_stock(self):
