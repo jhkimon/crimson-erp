@@ -112,11 +112,12 @@ class SupplierVariantUpdateSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"공급자 '{value}'는 존재하지 않습니다.")
 
 class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
-    product_id = serializers.CharField(source="product.product_id")
-    name = serializers.CharField(source="product.name")
+    product_id = serializers.CharField(source="product.product_id", read_only=True)
+    name = serializers.CharField(source="product.name", required=False)
     suppliers = SupplierVariantUpdateSerializer(many=True, required=False)
+    option = serializers.CharField(required=False)
     category = serializers.CharField(write_only=True, required=False) # write-only 입력용
-    category_name = serializers.CharField(source="product.category.name", read_only=True) # read-only 출력용
+    category_name = serializers.CharField(source="product.category", read_only=True) # read-only 출력용
 
     class Meta:
         model = ProductVariant
@@ -163,8 +164,8 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         # Update ProductVariant fields
-        product_data = validated_data.pop('product', {})
-        if 'name' in product_data:
+        product_data = validated_data.pop('product', None)
+        if isinstance(product_data, dict) and 'name' in product_data:
             instance.product.name = product_data['name']
             instance.product.save()
 
@@ -172,14 +173,16 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
         category_value = validated_data.pop('category', None)
         if category_value:
             instance.product.category = category_value
+            instance.product.save()
 
+        # 공급자 업데이트
         suppliers_data = validated_data.pop('suppliers', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Update SupplierVariants (optional)
+        # Update SupplierVariants
         if suppliers_data is not None:
             # 기존 관계 제거
             SupplierVariant.objects.filter(variant=instance).delete()

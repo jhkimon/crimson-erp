@@ -97,7 +97,7 @@ class ProductVariantCSVUploadView(APIView):
     def infer_sheet_type(self, df: pd.DataFrame) -> str:
         if "상품 품목코드" in df.columns and "옵션" in df.columns:
             return "variant_detail"
-        elif "바코드" in df.columns and "총매출" in df.columns:
+        elif "바코드" in df.columns and "매출건수" in df.columns:
             return "sales_summary"
         else:
             return "unknown"
@@ -293,6 +293,7 @@ class ProductVariantView(APIView):
 
     @swagger_auto_schema(
         operation_summary="상품 상세 정보 생성 (방패 필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         operation_description="기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 variant_code 자동 생성",
         request_body=ProductVariantCreateSerializer,
         responses={201: ProductVariantSerializer, 400: "Bad Request"}
@@ -322,7 +323,8 @@ class ProductVariantView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
-        operation_summary="상품 상세 목록 조회 (필터/정렬/페이지네이션 지원)",
+        operation_summary="상품 상세 목록 조회",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter('stock_lt', openapi.IN_QUERY, description='재고 수량 미만', type=openapi.TYPE_INTEGER),
             openapi.Parameter('stock_gt', openapi.IN_QUERY, description='재고 수량 초과', type=openapi.TYPE_INTEGER),
@@ -358,6 +360,7 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 조회 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
@@ -381,6 +384,7 @@ class ProductVariantDetailView(APIView):
     
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 수정 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
         openapi.Parameter(
                 name="variant_code",
@@ -429,6 +433,7 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 삭제 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
@@ -483,6 +488,9 @@ class InventoryItemMergeView(APIView):
         if not isinstance(source_variant_codes, list) or not target_variant_code:
             return Response({"error": "target_variant_code와 source_variant_codes(리스트)를 모두 제공해야 합니다."}, status=status.HTTP_400_BAD_REQUEST)
 
+        if target_variant_code in source_variant_codes:
+            return Response({"error": "target_variant_code는 source_variant_codes에 포함될 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+
         # Ensure target variant exists
         try:
             target_variant = ProductVariant.objects.get(
@@ -515,16 +523,13 @@ class InventoryItemMergeView(APIView):
     def _merge_variant_data(self, target_variant, source_variants):
         # 재고 합산
         total_stock = target_variant.stock
-        total_reserved_stock = target_variant.reserved_stock
         total_adjustment = target_variant.adjustment
 
         for source_variant in source_variants:
             total_stock += source_variant.stock
-            total_reserved_stock += source_variant.reserved_stock
             total_adjustment += source_variant.adjustment
 
         target_variant.stock = total_stock
-        target_variant.reserved_stock = total_reserved_stock
         target_variant.adjustment = total_adjustment
         target_variant.save()
 
