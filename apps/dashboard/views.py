@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.db.models import Count, F, Sum, ExpressionWrapper, IntegerField
 from apps.orders.models import Order
 from apps.inventory.models import ProductVariant
+from apps.hr.models import VacationRequest
 
 class DashboardSummaryView(APIView):
     permission_classes = [AllowAny]
@@ -91,10 +92,28 @@ class DashboardSummaryView(APIView):
             for order in recent_orders
         ]
 
+        # 6. 최근 휴가 이력 (최근 승인된 순으로 5건)
+        recent_vacations = VacationRequest.objects.filter(
+            status='APPROVED'
+        ).select_related('employee').order_by('-created_at')[:5]
+
+        vacation_history = [
+            {
+                "employee": vacation.employee.get_full_name() or vacation.employee.username,
+                "leave_type": vacation.get_leave_type_display(),
+                "start_date": vacation.start_date,
+                "end_date": vacation.end_date,
+                "created_at": vacation.created_at,
+            }
+            for vacation in recent_vacations
+        ]
+        
+
         return Response({
             "total_sales": total_sales,
             "top_low_stock": top_low_stock,
             "top_sales": top_sales,
             "arriving_soon_orders": arriving_soon,
-            "recent_orders": recent_order_list
+            "recent_orders": recent_order_list,
+            "recent_vacations": vacation_history
         })
