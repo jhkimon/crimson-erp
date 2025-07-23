@@ -8,11 +8,11 @@ class ProductVariantFilter(django_filters.FilterSet):
     sales_min = django_filters.NumberFilter(method="filter_sales_min")
     sales_max = django_filters.NumberFilter(method="filter_sales_max")
     product_name = django_filters.CharFilter(method="filter_product_name")
-
+    category = django_filters.CharFilter(field_name="product__category", lookup_expr="icontains")
 
     class Meta:
         model = ProductVariant
-        fields = ["stock_lt", "stock_gt", "sales_min", "sales_max", "product_name"]
+        fields = ["stock_lt", "stock_gt", "sales_min", "sales_max", "product_name", "category"]
 
     def filter_sales_min(self, queryset, name, value):
         return queryset.annotate(

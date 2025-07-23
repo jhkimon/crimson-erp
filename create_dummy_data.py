@@ -19,8 +19,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crimsonerp.settings')
 django.setup()
 
 # Django 모델 import (django.setup() 이후에 해야 함)
-from apps.hr.models import Employee
-from apps.inventory.models import InventoryItem, ProductVariant
+from apps.hr.models import Employee, VacationRequest
+from apps.inventory.models import InventoryItem, ProductVariant, InventoryAdjustment
 from apps.supplier.models import Supplier, SupplierVariant
 from apps.orders.models import Order, OrderItem
 from apps.hr.models import Employee
@@ -179,6 +179,7 @@ def create_product_variants(inventory_items):
                 memo=random.choice(["", "인기 상품", "한정 재고"]),
                 order_count=order_count,
                 return_count=return_count,
+                is_active=True,
             )
             product_variants.append(variant)
         else:
@@ -325,6 +326,68 @@ def create_orders(product_variants):
     print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
     return orders
 
+def create_vacation_requests(employees):
+    """직원별 휴가 요청 더미 데이터 생성"""
+    print_status("휴가 요청 데이터 생성 중...", "🌴")
+
+    LEAVE_TYPES = ['VACATION', 'HALF_DAY_AM', 'HALF_DAY_PM', 'SICK', 'OTHER']
+    STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']
+
+    count = 0
+    for employee in employees:
+        n_requests = random.randint(2, 4)
+        for _ in range(n_requests):
+            leave_type = random.choice(LEAVE_TYPES)
+            status = random.choice(STATUSES)
+            start_date = timezone.now().date() + timedelta(days=random.randint(-30, 30))
+            if leave_type in ['HALF_DAY_AM', 'HALF_DAY_PM']:
+                end_date = start_date
+            else:
+                end_date = start_date + timedelta(days=random.randint(0, 3))
+
+            VacationRequest.objects.create(
+                employee=employee,
+                leave_type=leave_type,
+                start_date=start_date,
+                end_date=end_date,
+                reason=random.choice(["개인 사정", "가족 행사", "병원 진료", "휴식 필요", "기타"]),
+                status=status,
+                reviewed_at=timezone.now() if status != 'PENDING' else None
+            )
+            count += 1
+    print_status(f"총 {count}개의 휴가 요청 생성 완료", "   ✓")
+
+def create_inventory_adjustments(product_variants):
+    """ProductVariant 기반 재고 조정 더미 생성"""
+    print_status("재고 조정 데이터 생성 중...", "🔧")
+
+    if not product_variants:
+        print_status("상품 옵션이 없어 재고 조정을 생성할 수 없습니다.", "⚠️")
+        return []
+
+    reasons = ["입고 오류 수정", "파손/불량", "기초 재고 등록", "정기 재고조사", "기타"]
+    adjustments = []
+
+    for variant in random.sample(product_variants, k=min(5, len(product_variants))):
+        delta = random.randint(-5, 10)
+        reason = random.choice(reasons)
+        created_by = random.choice(Employee.objects.filter(is_staff=True)).username  # 사용자명
+
+        # 재고 업데이트
+        variant.stock = max(0, variant.stock + delta)
+        variant.save()
+
+        adjustment = InventoryAdjustment.objects.create(
+            variant=variant,
+            delta=delta,
+            reason=reason,
+            created_by=created_by,
+        )
+
+        adjustments.append(adjustment)
+
+    print_status(f"총 {len(adjustments)}개의 재고 조정 생성 완료", "   ✓")
+    return adjustments
 
 def display_summary():
     """생성된 데이터 요약 표시 (레퍼런스 스타일)"""
@@ -335,6 +398,10 @@ def display_summary():
     print(f"   🎨 상품옵션: {ProductVariant.objects.count()}개") 
     print(f"   📋 주문: {Order.objects.count()}개")
     print(f"   🏢 공급업체: {Supplier.objects.count()}개")
+    print(f"   🌴 휴가 요청: {VacationRequest.objects.count()}개")
+    print(f"   🔧 재고 조정 기록: {InventoryAdjustment.objects.count()}개")
+    
+    print("\n🔑 테스트 계정 정보:")
     
     print("\n🔑 테스트 계정 정보:")
     print("   - admin / crimson123 (관리자)")
@@ -376,6 +443,8 @@ def main():
         product_variants = create_product_variants(inventory_items)
         suppliers = create_suppliers(product_variants)
         orders = create_orders(product_variants)
+        vacation_requests = create_vacation_requests(employees)
+        inventory_adjustments = create_inventory_adjustments(product_variants)
         
         print_status("더미데이터 생성이 완료되었습니다!", "✅")
         display_summary()
