@@ -19,20 +19,20 @@ class SupplierListCreateView(APIView):
 
     @swagger_auto_schema(
         operation_summary="공급업체 목록 조회",
-        responses={200: SupplierOptionSerializer(many=True)}
+        responses={200: SupplierSerializer(many=True)}
     )
     def get(self, request):
         suppliers = Supplier.objects.all()
-        serializer = SupplierOptionSerializer(suppliers, many=True)
+        serializer = SupplierSerializer(suppliers, many=True)
         return Response(serializer.data)
 
     @swagger_auto_schema(
         operation_summary="공급업체 등록",
-        request_body=SupplierOptionSerializer,
-        responses={201: SupplierOptionSerializer}
+        request_body=SupplierSerializer,
+        responses={201: SupplierSerializer}
     )
     def post(self, request):
-        serializer = SupplierOptionSerializer(data=request.data)
+        serializer = SupplierSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -69,6 +69,8 @@ class SupplierRetrieveUpdateView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 class SupplierVariantUpdateView(APIView):
+    permission_classes = [AllowAny]
+    
     @swagger_auto_schema(
         operation_summary="공급업체-상품 옵션 매핑 수정",
         manual_parameters=[
