@@ -175,6 +175,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-reservations': {
+        'task': 'inventory.tasks.cleanup_expired_reservations',
+        'schedule': 300.0,  # 5분마다 실행
+    },
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/

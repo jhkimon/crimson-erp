@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import InventoryItem, ProductVariant
-from apps.supplier.models import SupplierVariant
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from apps.supplier.models import SupplierVariant, Supplier
 
 
 class ProductOptionSerializer(serializers.ModelSerializer):
@@ -18,7 +18,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
     suppliers = serializers.SerializerMethodField()
     cost_price = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
     product_id = serializers.CharField(source='product.product_id', read_only=True)
+    stock = serializers.IntegerField(read_only=True)
     sales = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
 
@@ -27,6 +29,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         fields = [
             'product_id',    # product_id
             'name',             # 상품명
+            'category',         # 상품 카테고리
             'variant_code',         # variant_code
             'option',               # 옵션
             'stock',                # 재고량
@@ -78,6 +81,11 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     def get_name(self, obj):
         return obj.product.name if obj.product else None
     
+    def get_category(self, obj):
+        return obj.product.category if obj.product else None
+
+
+# 간단한 응답용 시리얼라이저들
     
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
     variants = serializers.SerializerMethodField()
@@ -104,14 +112,16 @@ class SupplierVariantUpdateSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"공급자 '{value}'는 존재하지 않습니다.")
 
 class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
-    product_id = serializers.CharField(source="product.product_id")  # ← 추가
+    product_id = serializers.CharField(source="product.product_id")
     name = serializers.CharField(source="product.name")
     suppliers = SupplierVariantUpdateSerializer(many=True, required=False)
+    category = serializers.CharField(write_only=True, required=False) # write-only 입력용
+    category_name = serializers.CharField(source="product.category.name", read_only=True) # read-only 출력용
 
     class Meta:
         model = ProductVariant
         fields = [
-            'product_id', 'variant_code', 'option', 'stock', 'price',
+            'product_id', 'variant_code', 'category', 'category_name', 'option', 'stock', 'price',
             'min_stock', 'description', 'memo',
             'name', 'suppliers'
         ]
@@ -126,10 +136,14 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
         return fields
 
     def create(self, validated_data):
-        from apps.supplier.models import SupplierVariant
-
         product = self.context.get('product')
         validated_data.pop('product', None)
+
+        # category 처리
+        category_value = validated_data.pop('category', None)
+        if category_value:
+            product.category = category_value
+            product.save()
 
         # suppliers 분리
         suppliers_data = validated_data.pop('suppliers', [])
@@ -154,6 +168,11 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             instance.product.name = product_data['name']
             instance.product.save()
 
+        # 카테고리 업데이트
+        category_value = validated_data.pop('category', None)
+        if category_value:
+            instance.product.category = category_value
+
         suppliers_data = validated_data.pop('suppliers', None)
 
         for attr, value in validated_data.items():
@@ -162,7 +181,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
 
         # Update SupplierVariants (optional)
         if suppliers_data is not None:
-            from apps.supplier.models import SupplierVariant, Supplier
             # 기존 관계 제거
             SupplierVariant.objects.filter(variant=instance).delete()
 
@@ -180,3 +198,23 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
 class ProductVariantCreateSerializer(ProductVariantFullUpdateSerializer):
     class Meta(ProductVariantFullUpdateSerializer.Meta):
         fields = [f for f in ProductVariantFullUpdateSerializer.Meta.fields if f != 'variant_code']
+
+# 재고조정용 Serailizer
+class InventoryAdjustmentSerializer(serializers.ModelSerializer):
+    variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
+    product_id = serializers.CharField(source='variant.product.product_id', read_only=True)
+    product_name = serializers.CharField(source='variant.product.name', read_only=True)
+
+    class Meta:
+        model = InventoryAdjustment
+        fields = [
+            'id',
+            'variant_code',
+            'product_id',
+            'product_name',
+            'delta',
+            'reason',
+            'created_by',
+            'created_at',
+        ]
+        read_only_fields = fields

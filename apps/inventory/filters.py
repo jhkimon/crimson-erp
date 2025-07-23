@@ -1,6 +1,6 @@
 import django_filters
 from django.db.models import F, ExpressionWrapper, IntegerField
-from .models import ProductVariant
+from .models import ProductVariant, InventoryAdjustment
 
 class ProductVariantFilter(django_filters.FilterSet):
     stock_lt = django_filters.NumberFilter(field_name="stock", lookup_expr="lt")
@@ -32,3 +32,10 @@ class ProductVariantFilter(django_filters.FilterSet):
     
     def filter_product_name(self, queryset, name, value):
             return queryset.filter(product__name__icontains=value)
+    
+class InventoryAdjustmentFilter(django_filters.FilterSet):
+    variant_code = django_filters.CharFilter(field_name='variant__variant_code', lookup_expr='exact')
+
+    class Meta:
+        model = InventoryAdjustment
+        fields = ['variant_code']

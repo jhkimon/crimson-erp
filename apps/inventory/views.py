@@ -1,19 +1,34 @@
+import io
+from django.db import transaction
+from django.http import HttpResponse
+import openpyxl
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.permissions import AllowAny
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.parsers import MultiPartParser
 from django.db import transaction
 from drf_yasg import openapi
-from .models import InventoryItem, ProductVariant
-from .serializers import ProductOptionSerializer, ProductVariantSerializer, ProductVariantFullUpdateSerializer, InventoryItemWithVariantsSerializer, ProductVariantCreateSerializer
+from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from .serializers import (
+    ProductVariantSerializer, 
+    ProductOptionSerializer, 
+    ProductVariantSerializer, 
+    ProductVariantFullUpdateSerializer, 
+    InventoryItemWithVariantsSerializer, 
+    ProductVariantCreateSerializer, 
+    InventoryAdjustmentSerializer
+)
+
 import pandas as pd
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
-from .filters import ProductVariantFilter
+from .filters import ProductVariantFilter, InventoryAdjustmentFilter
 
 
 
@@ -30,27 +45,6 @@ class ProductOptionListView(APIView):
         products = InventoryItem.objects.all().only('product_id', 'name')
         serializer = ProductOptionSerializer(products, many=True)
         return Response(serializer.data)
-    
-# # 재고 전체 조회
-# class InventoryListView(APIView):
-#     """
-#     GET: 전체 제품 목록 조회
-#     POST: 새로운 제품 추가
-#     """
-
-#     permission_classes = [AllowAny]
-#     # 전체 목록 조회
-
-#     @swagger_auto_schema(
-#         operation_summary="전체 제품 목록 조회 (방패필통)",
-#         operation_description="현재 등록된 모든 제품 목록을 조회합니다.",
-#         responses={200: InventoryItemWithVariantsSerializer(many=True)}
-#     )
-#     def get(self, request):
-#         items = InventoryItem.objects.all()
-#         serializer = InventoryItemWithVariantsSerializer(items, many=True)
-#         return Response(serializer.data)
-
 
 # 일부 조회 (Product ID 기준)
 class InventoryItemView(APIView):
@@ -66,7 +60,7 @@ class InventoryItemView(APIView):
         manual_parameters=[openapi.Parameter(
             name="product_id",
             in_=openapi.IN_PATH,
-            description="조회할 상품의 product_id",
+            description="조회할 상품의 product_id (예: P00000YC)",
             type=openapi.TYPE_STRING
         )],
         responses={200: InventoryItemWithVariantsSerializer, 404: "Not Found"}
@@ -306,7 +300,7 @@ class ProductVariantDetailView(APIView):
         openapi.Parameter(
                 name="variant_code",
                 in_=openapi.IN_PATH,
-                description="수정할 variant_code (예: P00000XN000A)",
+                description="수정할 variant_code (예: P00000YC000A)",
                 type=openapi.TYPE_STRING
             )
         ],
@@ -317,7 +311,6 @@ class ProductVariantDetailView(APIView):
                 "product_id": openapi.Schema(type=openapi.TYPE_STRING, example="P00000YC"),
                 "name": openapi.Schema(type=openapi.TYPE_STRING, example="방패 필통"),
                 "option": openapi.Schema(type=openapi.TYPE_STRING, example="색상 : 크림슨"),
-                "stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=100),
                 "price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
                 "min_stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=4),
                 "description": openapi.Schema(type=openapi.TYPE_STRING, example=""),
@@ -367,6 +360,273 @@ class ProductVariantDetailView(APIView):
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
-        variant.is_active = False
-        variant.save()
-        return Response(status=204)
+        variant.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+# 동일 상품 다른 id 하나로 병합하기
+class InventoryItemMergeView(APIView):
+    """
+    POST: 동일 상품이지만 id가 다른 상품을 하나로 병합용
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="상품 코드 병합",
+        operation_description="여러 variant(source_variant_codes)를 target_variant_code로 병합합니다. 병합된 variant들은 삭제되고, 연관된 product도 통합됩니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["target_variant_code", "source_variant_codes"],
+            properties={
+                "target_variant_code": openapi.Schema(type=openapi.TYPE_STRING, description="최종 남길 variant_code"),
+                "source_variant_codes": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_STRING),
+                    description="합칠(삭제할) variant_code 리스트"
+                )
+            }
+        ),
+        responses={204: "Merge completed.",
+                   400: "Bad Request", 404: "Not Found"}
+    )
+    def post(self, request):
+        target_variant_code = request.data.get(
+            "target_variant_code")  # 병합 대상 variant_code (최종적으로 남는 코드)
+        # 병합 필요 variant_code (fade out되는 코드들)
+        source_variant_codes = request.data.get("source_variant_codes")
+
+        if not isinstance(source_variant_codes, list) or not target_variant_code:
+            return Response({"error": "target_variant_code와 source_variant_codes(리스트)를 모두 제공해야 합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure target variant exists
+        try:
+            target_variant = ProductVariant.objects.get(
+                variant_code=target_variant_code)
+        except ProductVariant.DoesNotExist:
+            return Response({"error": "target_variant_code에 해당하는 variant가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Exclude target from sources if accidentally included
+        source_variant_codes = [
+            code for code in source_variant_codes if code != target_variant_code]
+        source_variants = ProductVariant.objects.filter(
+            variant_code__in=source_variant_codes)
+
+        if not source_variants.exists():
+            return Response({"error": "합칠 source_variant_codes에 유효한 variant가 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Execute merge within transaction
+        with transaction.atomic():
+            # 1) 모든 source variant들의 데이터를 target variant로 병합
+            self._merge_variant_data(target_variant, source_variants)
+
+            # 2) Source variant들과 연관된 product 정리
+            self._cleanup_orphaned_products(
+                source_variants, target_variant.product)
+
+            # 3) Source variant들 삭제
+            source_variants.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _merge_variant_data(self, target_variant, source_variants):
+        """
+        Source variant들의 데이터를 target variant로 병합
+        """
+        # 재고 합산
+        total_stock = target_variant.stock
+        total_reserved_stock = target_variant.reserved_stock
+        total_adjustment = target_variant.adjustment
+
+        for source_variant in source_variants:
+            total_stock += source_variant.stock
+            total_reserved_stock += source_variant.reserved_stock
+            total_adjustment += source_variant.adjustment
+
+        # Target variant 업데이트
+        target_variant.stock = total_stock
+        target_variant.reserved_stock = total_reserved_stock
+        target_variant.adjustment = total_adjustment
+        target_variant.save()
+
+        # 재고 조정 기록들을 target variant로 이동
+        from .models import InventoryAdjustment
+        InventoryAdjustment.objects.filter(
+            variant__in=source_variants
+        ).update(variant=target_variant)
+
+        # 판매 트랜잭션 아이템들을 target variant로 이동
+        from .models import SalesTransactionItem
+        SalesTransactionItem.objects.filter(
+            variant__in=source_variants
+        ).update(variant=target_variant)
+
+        # 재고 예약들을 target variant로 이동
+        from .models import StockReservation
+        StockReservation.objects.filter(
+            variant__in=source_variants
+        ).update(variant=target_variant)
+
+        # 외래키 참조하는 다른 테이블들을 target variant로 이동
+        from django.db import connection
+        with connection.cursor() as cursor:
+            source_variant_ids = [str(v.id) for v in source_variants]
+            if source_variant_ids:
+                # order_items 테이블 업데이트 (다른 앱에 있는 테이블)
+                cursor.execute(
+                    f"UPDATE order_items SET variant_id = %s WHERE variant_id IN ({','.join(['%s'] * len(source_variant_ids))})",
+                    [target_variant.id] + source_variant_ids
+                )
+
+                # supplier_suppliervariant 테이블 업데이트
+                cursor.execute(
+                    f"UPDATE supplier_suppliervariant SET variant_id = %s WHERE variant_id IN ({','.join(['%s'] * len(source_variant_ids))})",
+                    [target_variant.id] + source_variant_ids
+                )
+
+    def _cleanup_orphaned_products(self, source_variants, target_product):
+        """
+        Source variant들이 삭제된 후 고아가 되는 product들을 정리
+        """
+        # Source variant들의 product들을 찾음
+        source_products = set()
+        for variant in source_variants:
+            if variant.product.id != target_product.id:
+                source_products.add(variant.product)
+
+        # 각 source product가 다른 variant를 가지고 있는지 확인
+        for product in source_products:
+            # 현재 삭제될 variant들을 제외한 다른 variant가 있는지 확인
+            remaining_variants = ProductVariant.objects.filter(
+                product=product
+            ).exclude(id__in=[v.id for v in source_variants])
+
+            # 다른 variant가 없으면 product 비활성화
+            if not remaining_variants.exists():
+                product.is_active = False
+                product.save()
+    
+################ 재고 조정
+# 재고 업데이트
+class StockUpdateView(APIView):
+    """
+    PUT: 재고량 수동 업데이트
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+            operation_summary="재고량 수동 업데이트",
+            tags=["inventory - Stock"],
+            operation_description="실사 재고량을 입력하여 재고를 업데이트하고 조정 이력을 자동 생성합니다.",
+            manual_parameters=[
+            openapi.Parameter(
+                    name="variant_code",
+                    in_=openapi.IN_PATH,
+                    description="수정할 variant_code (예: P00000YC000A)",
+                    type=openapi.TYPE_STRING
+                )
+            ],
+            request_body=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                required=['actual_stock'],
+                properties={
+                    'actual_stock': openapi.Schema(
+                        type=openapi.TYPE_INTEGER,
+                        description="실사한 실제 재고량",
+                        example=125
+                    ),
+                    'reason': openapi.Schema(
+                        type=openapi.TYPE_STRING,
+                        description="조정 사유",
+                        example="2025년 2분기 실사"
+                    ),
+                    'updated_by': openapi.Schema(
+                        type=openapi.TYPE_STRING,
+                        description="작업자",
+                        example="유시진"
+                    )
+                }
+            ),
+            responses={200: "Stock updated successfully", 404: "Not Found"}
+    )
+    def put(self, request, variant_code: str):
+        try:
+            variant = ProductVariant.objects.get(variant_code=variant_code)
+        except ProductVariant.DoesNotExist:
+            return Response({"error": "Variant not found"}, status=404)
+
+        actual_stock = request.data.get('actual_stock')
+        if actual_stock is None:
+            return Response({"error": "actual_stock is required"}, status=400)
+
+        if actual_stock < 0:
+            return Response({"error": "actual_stock cannot be negative"}, status=400)
+
+        # 현재 총 재고량 (stock + adjustment)
+        current_total_stock = variant.stock + variant.adjustment
+        delta = actual_stock - current_total_stock
+
+        # 조정이 필요한 경우에만 처리
+        if delta != 0:
+            # 조정 이력 생성 (감사 추적용)
+            InventoryAdjustment.objects.create(
+                variant=variant,
+                delta=delta,
+                reason=request.data.get('reason', '재고 실사'),
+                created_by=request.data.get('updated_by', 'unknown')
+            )
+
+            # stock을 실제 재고로 업데이트, adjustment는 0으로 리셋
+            variant.stock = actual_stock
+            variant.adjustment = 0
+            variant.save()
+
+            return Response({
+                "message": "재고 업데이트 완료",
+                "previous_total_stock": current_total_stock,
+                "new_stock": actual_stock,
+                "adjustment_delta": delta,
+                "updated_at": variant.updated_at
+            }, status=200)
+        else:
+            return Response({
+                "message": "조정 불필요 - 재고가 일치합니다",
+                "current_stock": current_total_stock
+            }, status=200)
+        
+############ 재고 조정
+class InventoryAdjustmentListView(generics.ListAPIView):
+    """
+    GET: 재고 조정 이력 전체 조회 또는 품목별 조회
+    - variant_code로 필터 가능
+    - 최신순 정렬 (기본 10건 페이지네이션)
+    """
+    permission_classes = [AllowAny]
+    queryset = InventoryAdjustment.objects.select_related("variant__product").all()
+    serializer_class = InventoryAdjustmentSerializer
+    filterset_class = InventoryAdjustmentFilter
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['variant__variant_code']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']  # 최신순 기본 정렬
+
+    @swagger_auto_schema(
+        operation_summary="재고 조정 이력 조회",
+        tags=["inventory - Stock"],
+        operation_description="variant_code 기준 필터링 및 페이지네이션 지원",
+        manual_parameters=[
+            openapi.Parameter(
+                name='variant_code',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='조회할 variant_code (예: P00000YC000A)'
+            ),
+            openapi.Parameter(
+                name='page',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='페이지 번호 (기본=1)'
+            )
+        ]
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
