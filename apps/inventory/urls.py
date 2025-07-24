@@ -1,10 +1,11 @@
 from django.urls import path
-from .views import (ProductOptionListView, ProductVariantDetailView, InventoryItemView, ProductVariantView,
+from .views import (ProductOptionListView, ProductVariantDetailView, ProductVariantExportView, InventoryItemView, ProductVariantView,
                     InventoryItemMergeView, ProductVariantCSVUploadView, StockUpdateView, InventoryAdjustmentListView)
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name='inventory_options'),
     path("variants/", ProductVariantView.as_view(), name="variant"),
+    path("variants/export/", ProductVariantExportView.as_view(), name="variant_export"),
     path("variants/merge/", InventoryItemMergeView.as_view(),name="inventoryitem-variant-merge"), 
     path("adjustments/", InventoryAdjustmentListView.as_view(), name="inventory-adjustments"),
     path("variants/<str:variant_code>/", ProductVariantDetailView.as_view(), name="variant-detail"),

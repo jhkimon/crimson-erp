@@ -46,6 +46,7 @@ class OrderAPITestCase(APITestCase):
                 "variant_code": self.variant.variant_code,
                 "quantity": 10,
                 "unit_price": 5000,
+                "unit": "EA",
                 "remark": "박스포장",
                 "spec": "B급"
             }]

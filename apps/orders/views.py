@@ -72,6 +72,7 @@ class OrderListView(APIView):
                             "variant_code": openapi.Schema(type=openapi.TYPE_STRING, example="P00000XN000A"),
                             "quantity": openapi.Schema(type=openapi.TYPE_INTEGER, example=100),
                             "unit_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
+                            "unit": openapi.Schema(type=openapi.TYPE_STRING, example="EA"),
                             "remark": openapi.Schema(type=openapi.TYPE_STRING, example="박스 포장"),
                             "spec": openapi.Schema(type=openapi.TYPE_STRING, example="B급")
                         }
@@ -229,3 +230,35 @@ class OrderDetailView(APIView):
             "order": serializer.data,
             "stock_changes": stock_changes
         }, status=status.HTTP_200_OK)
+    
+class OrderExportView(APIView):
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ['order_date', 'expected_delivery_date']
+
+    @swagger_auto_schema(
+        operation_summary="전체 주문 Export (엑셀용)",
+        operation_description="필터링/정렬은 유지하며 pagination 없이 모든 주문 데이터를 반환합니다.",
+        manual_parameters=[
+            openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('product_name', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('supplier', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('status', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date'),
+            openapi.Parameter('end_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date'),
+        ],
+        responses={200: OrderCompactSerializer(many=True)}
+    )
+    def get(self, request):
+        queryset = Order.objects.prefetch_related("items__variant__product").all()
+
+        for backend in self.filter_backends:
+            queryset = backend().filter_queryset(request, queryset, self)
+
+        ordering = request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(ordering)
+
+        serializer = OrderCompactSerializer(queryset, many=True)
+        return Response(serializer.data, status=200)

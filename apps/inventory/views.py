@@ -454,6 +454,42 @@ class ProductVariantDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 
+class ProductVariantExportView(APIView):
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = ProductVariantFilter
+    ordering_fields = ["stock", "price"]
+
+    @swagger_auto_schema(
+        operation_summary="전체 상품 상세 정보 Export (엑셀용)",
+        tags=["inventory - Variant CRUD"],
+        manual_parameters=[
+            openapi.Parameter('stock_lt', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('stock_gt', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_min', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_max', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('product_name',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING),
+            openapi.Parameter('category',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING),
+            openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
+        responses={200: ProductVariantSerializer(many=True)}
+    )
+    def get(self, request):
+        queryset = ProductVariant.objects.select_related("product").all()
+
+        # filtering
+        for backend in list(self.filter_backends):
+            queryset = backend().filter_queryset(request, queryset, self)
+
+        # ordering
+        ordering = request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(ordering)
+
+        serializer = ProductVariantSerializer(queryset, many=True)
+        return Response(serializer.data, status=200)
+    
+
 # 동일 상품 다른 id 하나로 병합하기
 class InventoryItemMergeView(APIView):
     """

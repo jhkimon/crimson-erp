@@ -13,7 +13,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit_price', 'remark', 'spec']
+        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit', 'unit_price', 'remark', 'spec']
 
     def get_item_name(self, obj):
         return obj.variant.product.name if obj.variant and obj.variant.product else None
