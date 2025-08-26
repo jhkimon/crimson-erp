@@ -294,8 +294,69 @@ class ProductVariantView(APIView):
     @swagger_auto_schema(
         operation_summary="상품 상세 정보 생성 (방패 필통 크림슨)",
         tags=["inventory - Variant CRUD"],
-        operation_description="기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 variant_code 자동 생성",
-        request_body=ProductVariantCreateSerializer,
+        operation_description=(
+            "기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 variant_code 자동 생성"
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["product_id", "name"],
+            properties={
+                "product_id": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품 식별자", example="P00000YC"
+                ),
+                "name": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품명", example="방패 필통"
+                ),
+                "category": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품 카테고리", example="문구"
+                ),
+                "option": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="옵션", example="색상 : 크림슨"
+                ),
+                "stock": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="초기 재고", example=100
+                ),
+                "price": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="판매가", example=5900
+                ),
+                "min_stock": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="최소 재고", example=5
+                ),
+                "description": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="설명", example="튼튼한 크림슨 컬러 방패 필통"
+                ),
+                "memo": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="메모", example="23FW 신상품"
+                ),
+                "suppliers": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description="공급자 매핑 목록",
+                    items=openapi.Items(
+                        type=openapi.TYPE_OBJECT,
+                        required=["name", "cost_price", "is_primary"],
+                        properties={
+                            "name": openapi.Schema(type=openapi.TYPE_STRING, example="넥스트물류"),
+                            "cost_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=3016),
+                            "is_primary": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
+                        },
+                    ),
+                ),
+            },
+            example={
+                "product_id": "P00000YC",
+                "name": "방패 필통",
+                "category": "문구",
+                "option": "색상 : 크림슨",
+                "stock": 100,
+                "price": 5900,
+                "min_stock": 5,
+                "description": "튼튼한 크림슨 컬러 방패 필통",
+                "memo": "23FW 신상품",
+                "suppliers": [
+                    {"name": "넥스트물류", "cost_price": 3016, "is_primary": True}
+                ]
+            }
+        ),
         responses={201: ProductVariantSerializer, 400: "Bad Request"}
     )
     def post(self, request):
@@ -305,12 +366,17 @@ class ProductVariantView(APIView):
         if not product_id or not product_name:
             return Response({"error": "product_id와 name은 필수입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        product, _ = InventoryItem.objects.get_or_create(
+        product, created = InventoryItem.objects.get_or_create(
             product_id=product_id,
             defaults={'name': product_name}
         )
 
-        variant_code = self.generate_variant_code(product)
+        if not created and not product.is_active:
+            product.is_active = True
+            product.name = product_name
+            product.save()
+
+        variant_code = self.generate_variant_code(product.product_id)
 
         serializer = ProductVariantFullUpdateSerializer(
             data=request.data,
