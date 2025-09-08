@@ -230,24 +230,27 @@ class ProductVariantCSVUploadView(APIView):
                             variant_code=variant_code
                         ).first()
 
+                    # ... 생략 ...
+
                     if variant:
                         self._snapshot_before("update", variant=variant)
                         variant.option = option
                         variant.price = price
-                        variant.stock += delta_stock
+                        # 핵심 수정: 판매/환불을 반영해서 재고 보정
+                        variant.stock += delta_stock - delta_order + delta_return
                         variant.order_count += delta_order
                         variant.return_count += delta_return
                         variant.save()
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
                         self._snapshot_before("create", variant_code=variant_code)
-
+                        # 핵심 수정: 신규 생성도 판매/환불 반영된 초기 재고로 저장
                         variant = ProductVariant.objects.create(
                             product=product,
                             variant_code=variant_code,
                             option=option,
                             price=price,
-                            stock=delta_stock,
+                            stock=(delta_stock - delta_order + delta_return),  # << 여기
                             order_count=delta_order,
                             return_count=delta_return,
                         )
