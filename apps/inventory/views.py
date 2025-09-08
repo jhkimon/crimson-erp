@@ -311,7 +311,14 @@ class ProductVariantCSVUploadView(APIView):
 
 
 def process_sales_summary(self, df):
-    required_cols = ["바코드", "분류명", "상품명", "판매가"]
+
+    required_cols = [
+        "바코드",
+        "분류명",
+        "상품명",
+        "판매가",
+        "매출건수",
+    ]  # 변경: 오프라인 업로드에 매출 반영이 필수이므로 '매출건수'를 추가
     for col in required_cols:
         if col not in df.columns:
             return Response(
@@ -335,16 +342,7 @@ def process_sales_summary(self, df):
                 )
                 name = str(row["상품명"]).strip()
                 price = int(row["판매가"]) if pd.notnull(row["판매가"]) else 0
-                sales_count = (
-                    int(row["매출건수"])
-                    if "매출건수" in df.columns and pd.notnull(row["매출건수"])
-                    else 0
-                )
-                return_count = (
-                    int(row["환불건수"])
-                    if "환불건수" in df.columns and pd.notnull(row["환불건수"])
-                    else 0
-                )  # 추가: 환불건수 읽기
+                sales_count = int(row["매출건수"]) if pd.notnull(row["매출건수"]) else 0
 
                 product, created_flag = InventoryItem.objects.get_or_create(
                     product_id=barcode, defaults={"name": name, "category": category}
@@ -365,28 +363,26 @@ def process_sales_summary(self, df):
                         "return_count": 0,
                     },
                 )
+
                 if variant_created:
                     self._snapshot_before("create", variant_code=variant.variant_code)
-                    variant.price = price  # 추가: 생성 직후 가격 동기화
-                    variant.order_count += sales_count  # 추가: 결제수량 누적
-                    variant.return_count += return_count  # 추가: 환불수량 누적
-                    variant.stock = (
-                        variant.stock - sales_count + return_count
-                    )  # 추가: 재고는 기존 재고량 -매출 건 수 + 환불 건 수
-                    variant.save()
-
+                    # 변경: 오프라인 '매출건수'를 결제수량(order_count)에 누적하고, 재고(stock)에서 차감
+                    ProductVariant.objects.filter(pk=variant.pk).update(  #
+                        price=price,
+                        order_count=F("order_count") + sales_count,
+                        stock=F("stock") - sales_count,
+                    )
+                    variant.refresh_from_db()  #
                     created.append(ProductVariantSerializer(variant).data)
                 else:
                     self._snapshot_before("update", variant=variant)
-
-                    variant.price = price
-                    variant.order_count += sales_count  # 추가: 결제수량 누적
-                    variant.return_count += return_count  # 추가: 환불수량 누적
-                    variant.stock = (
-                        variant.stock - sales_count + return_count
-                    )  # 변경: 기존 '-= sales_count'에서 수정
-                    variant.save()
-
+                    # 변경: 기존 variant에도 동일하게 결제수량 누적 + 재고 차감
+                    ProductVariant.objects.filter(pk=variant.pk).update(
+                        price=price,
+                        order_count=F("order_count") + sales_count,
+                        stock=F("stock") - sales_count,
+                    )
+                    variant.refresh_from_db()
                     updated.append(ProductVariantSerializer(variant).data)
 
             except Exception as e:
