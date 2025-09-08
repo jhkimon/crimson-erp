@@ -3,6 +3,10 @@ from datetime import timedelta
 
 import pandas as pd
 import openpyxl, xlrd
+import os, uuid, json
+from django.conf import settings
+from django.forms.models import model_to_dict
+
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -97,7 +101,7 @@ class ProductVariantCSVUploadView(APIView):
     def infer_sheet_type(self, df: pd.DataFrame) -> str:
         if "상품 품목코드" in df.columns and "옵션" in df.columns:
             return "variant_detail"
-        elif "바코드" in df.columns and "총매출" in df.columns:
+        elif "바코드" in df.columns and "매출건수" in df.columns:
             return "sales_summary"
         else:
             return "unknown"
@@ -124,6 +128,8 @@ class ProductVariantCSVUploadView(APIView):
 
         try:
             filename = excel_file.name
+            batch_id = self._batch_start(filename)
+
             if filename.endswith(".xls"):
                 df = pd.read_excel(excel_file, engine="xlrd")
             else:  # 기본은 .xlsx
@@ -139,6 +145,15 @@ class ProductVariantCSVUploadView(APIView):
             return self.process_sales_summary(df)
         else:
             return Response({"error": "파일 형식을 인식할 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if resp.status_code == 200:
+            self._batch_commit()
+            data = resp.data if isinstance(resp.data, dict) else {}
+            data["batch_id"] = self._batch["batch_id"]
+            return Response(data, status=200)
+        return resp
+        
+        
         
     def process_variant_detail(self, df):
         required_cols = ["상품코드", "상품명", "상품 품목코드", "옵션", "판매가", "재고", "판매수량", "환불수량"]
@@ -176,6 +191,7 @@ class ProductVariantCSVUploadView(APIView):
                         variant = ProductVariant.objects.filter(variant_code=variant_code).first()
 
                     if variant:
+                        self._snapshot_before("update", variant=variant)
                         variant.option = option
                         variant.price = price
                         variant.stock += delta_stock
@@ -184,6 +200,8 @@ class ProductVariantCSVUploadView(APIView):
                         variant.save()
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
+                        self._snapshot_before("create", variant_code=variant_code)
+
                         variant = ProductVariant.objects.create(
                             product=product,
                             variant_code=variant_code,
@@ -205,6 +223,44 @@ class ProductVariantCSVUploadView(APIView):
             "updated": updated,
             "errors": errors
         }, status=status.HTTP_200_OK)
+    
+    #배치로 업데이트 전 히스토리 저장
+    def _new_batch_id(self):
+        return timezone.now().strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+
+    def _batch_path(self, batch_id: str):
+        base = getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
+        folder = os.path.join(base, "import_backups")
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, f"{batch_id}.json")
+
+    def _batch_start(self, filename: str):
+        self._batch = {
+            "batch_id": self._new_batch_id(),
+            "filename": filename,
+            "snapshots": [],  # [{action, variant_code, before}]
+        }
+        self._batch_file = self._batch_path(self._batch["batch_id"])
+        return self._batch["batch_id"]
+
+    def _snapshot_before(self, action: str, variant=None, variant_code: str | None = None):
+        """
+        action: 'create' | 'update'
+        - update: 현재 DB값을 before로 저장
+        - create: 생성될 코드만 기록 (before=None)
+        """
+        before = model_to_dict(variant) if variant is not None else None
+        code = variant.variant_code if variant is not None else variant_code
+        self._batch["snapshots"].append({
+            "action": action,
+            "variant_code": code,
+            "before": before,
+        })
+
+    def _batch_commit(self):
+        # 업로드 전체가 성공한 경우에만 파일 저장
+        with open(self._batch_file, "w", encoding="utf-8") as f:
+            json.dump(self._batch, f, ensure_ascii=False, indent=2)
 
     def process_sales_summary(self, df):
         required_cols = ["바코드", "분류명", "상품명", "판매가"]
@@ -249,8 +305,12 @@ class ProductVariantCSVUploadView(APIView):
                         }
                     )
                     if variant_created:
+                        self._snapshot_before("create", variant_code=variant.variant_code)
+
                         created.append(ProductVariantSerializer(variant).data)
                     else:
+                        self._snapshot_before("update", variant=variant)
+                    
                         variant.price = price
                         variant.stock -= sales_count # 매출건수만큼 재고 차감
                         variant.save()
@@ -267,6 +327,8 @@ class ProductVariantCSVUploadView(APIView):
             "created": created,
             "updated": updated
         }, status=status.HTTP_200_OK)
+        
+    
 
 # 상품 상세 정보 관련 View
 class ProductVariantView(APIView):
@@ -293,8 +355,70 @@ class ProductVariantView(APIView):
 
     @swagger_auto_schema(
         operation_summary="상품 상세 정보 생성 (방패 필통 크림슨)",
-        operation_description="기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 variant_code 자동 생성",
-        request_body=ProductVariantCreateSerializer,
+        tags=["inventory - Variant CRUD"],
+        operation_description=(
+            "기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 variant_code 자동 생성"
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["product_id", "name"],
+            properties={
+                "product_id": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품 식별자", example="P00000YC"
+                ),
+                "name": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품명", example="방패 필통"
+                ),
+                "category": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="상품 카테고리", example="문구"
+                ),
+                "option": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="옵션", example="색상 : 크림슨"
+                ),
+                "stock": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="초기 재고", example=100
+                ),
+                "price": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="판매가", example=5900
+                ),
+                "min_stock": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="최소 재고", example=5
+                ),
+                "description": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="설명", example="튼튼한 크림슨 컬러 방패 필통"
+                ),
+                "memo": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="메모", example="23FW 신상품"
+                ),
+                "suppliers": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description="공급자 매핑 목록",
+                    items=openapi.Items(
+                        type=openapi.TYPE_OBJECT,
+                        required=["name", "cost_price", "is_primary"],
+                        properties={
+                            "name": openapi.Schema(type=openapi.TYPE_STRING, example="넥스트물류"),
+                            "cost_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=3016),
+                            "is_primary": openapi.Schema(type=openapi.TYPE_BOOLEAN, example=True),
+                        },
+                    ),
+                ),
+            },
+            example={
+                "product_id": "P00000YC",
+                "name": "방패 필통",
+                "category": "문구",
+                "option": "색상 : 크림슨",
+                "stock": 100,
+                "price": 5900,
+                "min_stock": 5,
+                "description": "튼튼한 크림슨 컬러 방패 필통",
+                "memo": "23FW 신상품",
+                "suppliers": [
+                    {"name": "넥스트물류", "cost_price": 3016, "is_primary": True}
+                ]
+            }
+        ),
         responses={201: ProductVariantSerializer, 400: "Bad Request"}
     )
     def post(self, request):
@@ -304,12 +428,17 @@ class ProductVariantView(APIView):
         if not product_id or not product_name:
             return Response({"error": "product_id와 name은 필수입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        product, _ = InventoryItem.objects.get_or_create(
+        product, created = InventoryItem.objects.get_or_create(
             product_id=product_id,
             defaults={'name': product_name}
         )
 
-        variant_code = self.generate_variant_code(product)
+        if not created and not product.is_active:
+            product.is_active = True
+            product.name = product_name
+            product.save()
+
+        variant_code = self.generate_variant_code(product.product_id)
 
         serializer = ProductVariantFullUpdateSerializer(
             data=request.data,
@@ -322,7 +451,8 @@ class ProductVariantView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
-        operation_summary="상품 상세 목록 조회 (필터/정렬/페이지네이션 지원)",
+        operation_summary="상품 상세 목록 조회",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter('stock_lt', openapi.IN_QUERY, description='재고 수량 미만', type=openapi.TYPE_INTEGER),
             openapi.Parameter('stock_gt', openapi.IN_QUERY, description='재고 수량 초과', type=openapi.TYPE_INTEGER),
@@ -358,6 +488,7 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 조회 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
@@ -381,6 +512,7 @@ class ProductVariantDetailView(APIView):
     
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 수정 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
         openapi.Parameter(
                 name="variant_code",
@@ -429,6 +561,7 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 삭제 (방패필통 크림슨)",
+        tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
@@ -447,6 +580,42 @@ class ProductVariantDetailView(APIView):
 
         variant.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+class ProductVariantExportView(APIView):
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = ProductVariantFilter
+    ordering_fields = ["stock", "price"]
+
+    @swagger_auto_schema(
+        operation_summary="전체 상품 상세 정보 Export (엑셀용)",
+        tags=["inventory - Variant CRUD"],
+        manual_parameters=[
+            openapi.Parameter('stock_lt', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('stock_gt', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_min', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('sales_max', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+            openapi.Parameter('product_name',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING),
+            openapi.Parameter('category',in_=openapi.IN_QUERY,type=openapi.TYPE_STRING),
+            openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+        ],
+        responses={200: ProductVariantSerializer(many=True)}
+    )
+    def get(self, request):
+        queryset = ProductVariant.objects.select_related("product").all()
+
+        # filtering
+        for backend in list(self.filter_backends):
+            queryset = backend().filter_queryset(request, queryset, self)
+
+        # ordering
+        ordering = request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(ordering)
+
+        serializer = ProductVariantSerializer(queryset, many=True)
+        return Response(serializer.data, status=200)
     
 
 # 동일 상품 다른 id 하나로 병합하기
@@ -483,6 +652,9 @@ class InventoryItemMergeView(APIView):
         if not isinstance(source_variant_codes, list) or not target_variant_code:
             return Response({"error": "target_variant_code와 source_variant_codes(리스트)를 모두 제공해야 합니다."}, status=status.HTTP_400_BAD_REQUEST)
 
+        if target_variant_code in source_variant_codes:
+            return Response({"error": "target_variant_code는 source_variant_codes에 포함될 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+
         # Ensure target variant exists
         try:
             target_variant = ProductVariant.objects.get(
@@ -515,16 +687,13 @@ class InventoryItemMergeView(APIView):
     def _merge_variant_data(self, target_variant, source_variants):
         # 재고 합산
         total_stock = target_variant.stock
-        total_reserved_stock = target_variant.reserved_stock
         total_adjustment = target_variant.adjustment
 
         for source_variant in source_variants:
             total_stock += source_variant.stock
-            total_reserved_stock += source_variant.reserved_stock
             total_adjustment += source_variant.adjustment
 
         target_variant.stock = total_stock
-        target_variant.reserved_stock = total_reserved_stock
         target_variant.adjustment = total_adjustment
         target_variant.save()
 
@@ -680,3 +849,64 @@ class InventoryAdjustmentListView(generics.ListAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+    
+###########CSV 업로드 후 롤백할 수 있는 엔드포인트 추가
+class ProductVariantUploadRollbackView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="업로드 롤백",
+        operation_description="CSV 업로드 배치(batch_id) 단위로 변경을 되돌립니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["batch_id"],
+            properties={
+                "batch_id": openapi.Schema(type=openapi.TYPE_STRING, description="업로드 응답으로 받은 배치 ID"),
+            }
+        ),
+        responses={200: "Rollback completed", 404: "Batch not found"}
+    )
+    def post(self, request):
+        batch_id = request.data.get("batch_id")
+        if not batch_id:
+            return Response({"error": "batch_id가 필요합니다."}, status=400)
+
+        path = os.path.join(getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media")),
+                            "import_backups", f"{batch_id}.json")
+        if not os.path.exists(path):
+            return Response({"error": "해당 batch_id의 스냅샷 파일이 없습니다."}, status=404)
+
+        with open(path, encoding="utf-8") as f:
+            batch = json.load(f)
+
+        snaps = batch.get("snapshots", [])
+
+        # 역순 적용: 마지막 변경부터 되돌리기
+        with transaction.atomic():
+            for s in reversed(snaps):
+                action = s.get("action")
+                code = s.get("variant_code")
+                before = s.get("before")
+
+                if action == "create":
+                    # 업로드에서 '생성된' 레코드는 삭제
+                    ProductVariant.objects.filter(variant_code=code).delete()
+                elif action == "update":
+                    try:
+                        v = ProductVariant.objects.get(variant_code=code)
+                    except ProductVariant.DoesNotExist:
+                        # 없으면 패스 (이미 수동삭제되었을 수도)
+                        continue
+
+                    # before 값으로 복구 (ID/타임스탬프는 제외)
+                    for field, value in before.items():
+                        if field in ("id", "created_at", "updated_at"):
+                            continue
+                        if field == "product":
+                            # product는 FK id로 저장되어 있음
+                            setattr(v, "product_id", value)
+                        else:
+                            setattr(v, field, value)
+                    v.save()
+
+        return Response({"message": "Rollback completed", "batch_id": batch_id}, status=200)

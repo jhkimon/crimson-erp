@@ -13,7 +13,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit_price', 'remark', 'spec']
+        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit', 'unit_price', 'remark', 'spec']
 
     def get_item_name(self, obj):
         return obj.variant.product.name if obj.variant and obj.variant.product else None
@@ -79,6 +79,19 @@ class OrderWriteSerializer(serializers.ModelSerializer):
             'packaging_included',
             'items'
         ]
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("items 리스트는 비어 있을 수 없습니다.")
+        return value
+
+    def validate(self, data):
+        order_date = data.get('order_date')
+        expected_delivery_date = data.get('expected_delivery_date')
+        if order_date and expected_delivery_date and expected_delivery_date < order_date:
+            raise serializers.ValidationError("배송 예정일은 주문일보다 주문일 이후여야 합니다.")
+        return data
+    
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')

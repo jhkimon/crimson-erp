@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 class InventoryItem(models.Model):
@@ -83,3 +84,72 @@ class InventoryAdjustment(models.Model):
 
     def __str__(self):
         return f"Adjustment for {self.variant.variant_code}: {self.delta}"
+
+class ImportBatch(models.Model):
+    SHEET_VARIANT = 'variant_detail'
+    SHEET_SALES = 'sales_summary'
+    SHEET_CHOICES = [
+        (SHEET_VARIANT, 'Variant Detail'),
+        (SHEET_SALES, 'Sales Summary'),
+    ]
+
+    STATUS_APPLIED = 'applied'
+    STATUS_ROLLED_BACK = 'rolled_back'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_APPLIED, 'Applied'),
+        (STATUS_ROLLED_BACK, 'Rolled Back'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    file_name = models.CharField(max_length=255)
+    sheet_type = models.CharField(max_length=32, choices=SHEET_CHOICES)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_APPLIED)
+    note = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        db_table = "import_batches"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Batch#{self.id} {self.sheet_type} ({self.file_name}) - {self.status}"
+
+
+class ImportChange(models.Model):
+    ACTION_CREATE_PRODUCT = 'create_product'
+    ACTION_UPDATE_PRODUCT = 'update_product'
+    ACTION_CREATE_VARIANT = 'create_variant'
+    ACTION_UPDATE_VARIANT = 'update_variant'
+    ACTION_CHOICES = [
+        (ACTION_CREATE_PRODUCT, 'Create Product'),
+        (ACTION_UPDATE_PRODUCT, 'Update Product'),
+        (ACTION_CREATE_VARIANT, 'Create Variant'),
+        (ACTION_UPDATE_VARIANT, 'Update Variant'),
+    ]
+
+    batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE, related_name='changes')
+
+    # 어떤 대상이 변경됐는지 연결(없을 수도 있음: 스킵/실패 행 기록용)
+    product = models.ForeignKey('InventoryItem', null=True, blank=True, on_delete=models.SET_NULL)
+    variant = models.ForeignKey('ProductVariant', null=True, blank=True, on_delete=models.SET_NULL)
+
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+
+    # 이전/이후 스냅샷, 가감치(옵션)
+    before = models.JSONField(null=True, blank=True)
+    after = models.JSONField(null=True, blank=True)
+    deltas = models.JSONField(null=True, blank=True)
+
+    # 엑셀 원본 행번호(1-based 등 가독용)
+    row_index = models.IntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "import_changes"
+        ordering = ["id"]
