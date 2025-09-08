@@ -3,6 +3,10 @@ from datetime import timedelta
 
 import pandas as pd
 import openpyxl, xlrd
+import os, uuid, json
+from django.conf import settings
+from django.forms.models import model_to_dict
+
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -124,6 +128,8 @@ class ProductVariantCSVUploadView(APIView):
 
         try:
             filename = excel_file.name
+            batch_id = self._batch_start(filename)
+
             if filename.endswith(".xls"):
                 df = pd.read_excel(excel_file, engine="xlrd")
             else:  # 기본은 .xlsx
@@ -139,6 +145,15 @@ class ProductVariantCSVUploadView(APIView):
             return self.process_sales_summary(df)
         else:
             return Response({"error": "파일 형식을 인식할 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if resp.status_code == 200:
+            self._batch_commit()
+            data = resp.data if isinstance(resp.data, dict) else {}
+            data["batch_id"] = self._batch["batch_id"]
+            return Response(data, status=200)
+        return resp
+        
+        
         
     def process_variant_detail(self, df):
         required_cols = ["상품코드", "상품명", "상품 품목코드", "옵션", "판매가", "재고", "판매수량", "환불수량"]
@@ -176,6 +191,7 @@ class ProductVariantCSVUploadView(APIView):
                         variant = ProductVariant.objects.filter(variant_code=variant_code).first()
 
                     if variant:
+                        self._snapshot_before("update", variant=variant)
                         variant.option = option
                         variant.price = price
                         variant.stock += delta_stock
@@ -184,6 +200,8 @@ class ProductVariantCSVUploadView(APIView):
                         variant.save()
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
+                        self._snapshot_before("create", variant_code=variant_code)
+
                         variant = ProductVariant.objects.create(
                             product=product,
                             variant_code=variant_code,
@@ -205,6 +223,44 @@ class ProductVariantCSVUploadView(APIView):
             "updated": updated,
             "errors": errors
         }, status=status.HTTP_200_OK)
+    
+    #배치로 업데이트 전 히스토리 저장
+    def _new_batch_id(self):
+        return timezone.now().strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+
+    def _batch_path(self, batch_id: str):
+        base = getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
+        folder = os.path.join(base, "import_backups")
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, f"{batch_id}.json")
+
+    def _batch_start(self, filename: str):
+        self._batch = {
+            "batch_id": self._new_batch_id(),
+            "filename": filename,
+            "snapshots": [],  # [{action, variant_code, before}]
+        }
+        self._batch_file = self._batch_path(self._batch["batch_id"])
+        return self._batch["batch_id"]
+
+    def _snapshot_before(self, action: str, variant=None, variant_code: str | None = None):
+        """
+        action: 'create' | 'update'
+        - update: 현재 DB값을 before로 저장
+        - create: 생성될 코드만 기록 (before=None)
+        """
+        before = model_to_dict(variant) if variant is not None else None
+        code = variant.variant_code if variant is not None else variant_code
+        self._batch["snapshots"].append({
+            "action": action,
+            "variant_code": code,
+            "before": before,
+        })
+
+    def _batch_commit(self):
+        # 업로드 전체가 성공한 경우에만 파일 저장
+        with open(self._batch_file, "w", encoding="utf-8") as f:
+            json.dump(self._batch, f, ensure_ascii=False, indent=2)
 
     def process_sales_summary(self, df):
         required_cols = ["바코드", "분류명", "상품명", "판매가"]
@@ -249,8 +305,12 @@ class ProductVariantCSVUploadView(APIView):
                         }
                     )
                     if variant_created:
+                        self._snapshot_before("create", variant_code=variant.variant_code)
+
                         created.append(ProductVariantSerializer(variant).data)
                     else:
+                        self._snapshot_before("update", variant=variant)
+                    
                         variant.price = price
                         variant.stock -= sales_count # 매출건수만큼 재고 차감
                         variant.save()
@@ -267,6 +327,8 @@ class ProductVariantCSVUploadView(APIView):
             "created": created,
             "updated": updated
         }, status=status.HTTP_200_OK)
+        
+    
 
 # 상품 상세 정보 관련 View
 class ProductVariantView(APIView):
@@ -787,3 +849,64 @@ class InventoryAdjustmentListView(generics.ListAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+    
+###########CSV 업로드 후 롤백할 수 있는 엔드포인트 추가
+class ProductVariantUploadRollbackView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="업로드 롤백",
+        operation_description="CSV 업로드 배치(batch_id) 단위로 변경을 되돌립니다.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["batch_id"],
+            properties={
+                "batch_id": openapi.Schema(type=openapi.TYPE_STRING, description="업로드 응답으로 받은 배치 ID"),
+            }
+        ),
+        responses={200: "Rollback completed", 404: "Batch not found"}
+    )
+    def post(self, request):
+        batch_id = request.data.get("batch_id")
+        if not batch_id:
+            return Response({"error": "batch_id가 필요합니다."}, status=400)
+
+        path = os.path.join(getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media")),
+                            "import_backups", f"{batch_id}.json")
+        if not os.path.exists(path):
+            return Response({"error": "해당 batch_id의 스냅샷 파일이 없습니다."}, status=404)
+
+        with open(path, encoding="utf-8") as f:
+            batch = json.load(f)
+
+        snaps = batch.get("snapshots", [])
+
+        # 역순 적용: 마지막 변경부터 되돌리기
+        with transaction.atomic():
+            for s in reversed(snaps):
+                action = s.get("action")
+                code = s.get("variant_code")
+                before = s.get("before")
+
+                if action == "create":
+                    # 업로드에서 '생성된' 레코드는 삭제
+                    ProductVariant.objects.filter(variant_code=code).delete()
+                elif action == "update":
+                    try:
+                        v = ProductVariant.objects.get(variant_code=code)
+                    except ProductVariant.DoesNotExist:
+                        # 없으면 패스 (이미 수동삭제되었을 수도)
+                        continue
+
+                    # before 값으로 복구 (ID/타임스탬프는 제외)
+                    for field, value in before.items():
+                        if field in ("id", "created_at", "updated_at"):
+                            continue
+                        if field == "product":
+                            # product는 FK id로 저장되어 있음
+                            setattr(v, "product_id", value)
+                        else:
+                            setattr(v, field, value)
+                    v.save()
+
+        return Response({"message": "Rollback completed", "batch_id": batch_id}, status=200)
