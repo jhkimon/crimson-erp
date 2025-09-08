@@ -309,96 +309,102 @@ class ProductVariantCSVUploadView(APIView):
         with open(self._batch_file, "w", encoding="utf-8") as f:
             json.dump(self._batch, f, ensure_ascii=False, indent=2)
 
+    def process_sales_summary(self, df):
 
-def process_sales_summary(self, df):
-
-    required_cols = [
-        "바코드",
-        "분류명",
-        "상품명",
-        "판매가",
-        "매출건수",
-    ]  # 변경: 오프라인 업로드에 매출 반영이 필수이므로 '매출건수'를 추가
-    for col in required_cols:
-        if col not in df.columns:
-            return Response(
-                {"error": f"필수 컬럼이 누락되었습니다: {col}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-    created = []
-    updated = []
-    errors = []
-
-    with transaction.atomic():
-        for i, row in df.iterrows():
-            try:
-                barcode = str(row["바코드"]).strip()
-                if not barcode or barcode.lower() == "nan" or barcode == "-":
-                    continue
-
-                category = (
-                    str(row["분류명"]).strip() if pd.notnull(row["분류명"]) else "일반"
-                )
-                name = str(row["상품명"]).strip()
-                price = int(row["판매가"]) if pd.notnull(row["판매가"]) else 0
-                sales_count = int(row["매출건수"]) if pd.notnull(row["매출건수"]) else 0
-
-                product, created_flag = InventoryItem.objects.get_or_create(
-                    product_id=barcode, defaults={"name": name, "category": category}
-                )
-                if not created_flag:
-                    product.name = name
-                    product.category = category
-                    product.save()
-
-                variant, variant_created = ProductVariant.objects.get_or_create(
-                    product=product,
-                    option="기본",
-                    defaults={
-                        "variant_code": self.generate_variant_code(barcode),
-                        "price": price,
-                        "stock": 0,
-                        "order_count": 0,
-                        "return_count": 0,
-                    },
+        required_cols = [
+            "바코드",
+            "분류명",
+            "상품명",
+            "판매가",
+            "매출건수",
+        ]  # 변경: 오프라인 업로드에 매출 반영이 필수이므로 '매출건수'를 추가
+        for col in required_cols:
+            if col not in df.columns:
+                return Response(
+                    {"error": f"필수 컬럼이 누락되었습니다: {col}"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-                if variant_created:
-                    self._snapshot_before("create", variant_code=variant.variant_code)
-                    # 변경: 오프라인 '매출건수'를 결제수량(order_count)에 누적하고, 재고(stock)에서 차감
-                    ProductVariant.objects.filter(pk=variant.pk).update(  #
-                        price=price,
-                        order_count=F("order_count") + sales_count,
-                        stock=F("stock") - sales_count,
+        created = []
+        updated = []
+        errors = []
+
+        with transaction.atomic():
+            for i, row in df.iterrows():
+                try:
+                    barcode = str(row["바코드"]).strip()
+                    if not barcode or barcode.lower() == "nan" or barcode == "-":
+                        continue
+
+                    category = (
+                        str(row["분류명"]).strip()
+                        if pd.notnull(row["분류명"])
+                        else "일반"
                     )
-                    variant.refresh_from_db()  #
-                    created.append(ProductVariantSerializer(variant).data)
-                else:
-                    self._snapshot_before("update", variant=variant)
-                    # 변경: 기존 variant에도 동일하게 결제수량 누적 + 재고 차감
-                    ProductVariant.objects.filter(pk=variant.pk).update(
-                        price=price,
-                        order_count=F("order_count") + sales_count,
-                        stock=F("stock") - sales_count,
+                    name = str(row["상품명"]).strip()
+                    price = int(row["판매가"]) if pd.notnull(row["판매가"]) else 0
+                    sales_count = (
+                        int(row["매출건수"]) if pd.notnull(row["매출건수"]) else 0
                     )
-                    variant.refresh_from_db()
-                    updated.append(ProductVariantSerializer(variant).data)
 
-            except Exception as e:
-                errors.append(f"{i+2}행: {str(e)}")
+                    product, created_flag = InventoryItem.objects.get_or_create(
+                        product_id=barcode,
+                        defaults={"name": name, "category": category},
+                    )
+                    if not created_flag:
+                        product.name = name
+                        product.category = category
+                        product.save()
 
-    return Response(
-        {
-            "type": "sales_summary",
-            "created_count": len(created),
-            "updated_count": len(updated),
-            "errors": errors,
-            "created": created,
-            "updated": updated,
-        },
-        status=status.HTTP_200_OK,
-    )
+                    variant, variant_created = ProductVariant.objects.get_or_create(
+                        product=product,
+                        option="기본",
+                        defaults={
+                            "variant_code": self.generate_variant_code(barcode),
+                            "price": price,
+                            "stock": 0,
+                            "order_count": 0,
+                            "return_count": 0,
+                        },
+                    )
+
+                    if variant_created:
+                        self._snapshot_before(
+                            "create", variant_code=variant.variant_code
+                        )
+                        # 변경: 오프라인 '매출건수'를 결제수량(order_count)에 누적하고, 재고(stock)에서 차감
+                        ProductVariant.objects.filter(pk=variant.pk).update(  #
+                            price=price,
+                            order_count=F("order_count") + sales_count,
+                            stock=F("stock") - sales_count,
+                        )
+                        variant.refresh_from_db()  #
+                        created.append(ProductVariantSerializer(variant).data)
+                    else:
+                        self._snapshot_before("update", variant=variant)
+                        # 변경: 기존 variant에도 동일하게 결제수량 누적 + 재고 차감
+                        ProductVariant.objects.filter(pk=variant.pk).update(
+                            price=price,
+                            order_count=F("order_count") + sales_count,
+                            stock=F("stock") - sales_count,
+                        )
+                        variant.refresh_from_db()
+                        updated.append(ProductVariantSerializer(variant).data)
+
+                except Exception as e:
+                    errors.append(f"{i+2}행: {str(e)}")
+
+        return Response(
+            {
+                "type": "sales_summary",
+                "created_count": len(created),
+                "updated_count": len(updated),
+                "errors": errors,
+                "created": created,
+                "updated": updated,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # 상품 상세 정보 관련 View
