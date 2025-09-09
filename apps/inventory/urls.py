@@ -1,6 +1,10 @@
 from django.urls import path
-from .views import (ProductOptionListView, ProductVariantDetailView, ProductVariantExportView, InventoryItemView, ProductVariantView,
-                    InventoryItemMergeView, ProductVariantCSVUploadView, StockUpdateView, InventoryAdjustmentListView)
+from .views import (ProductOptionListView, ProductVariantDetailView, ProductVariantExportView, 
+                    InventoryItemView, ProductVariantView,
+                    InventoryItemMergeView, ProductVariantCSVUploadView, 
+                    StockUpdateView, InventoryAdjustmentListView,
+                    InventorySnapshotListCreateView,
+                    InventorySnapshotRetrieveView)
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name='inventory_options'),
@@ -13,4 +17,7 @@ urlpatterns = [
     path('variants/stock/<str:variant_code>/', StockUpdateView.as_view(), name='stock-update'),
     path("<str:product_id>/", InventoryItemView.as_view(),
          name="inventoryitem-detail"), 
+    path("snapshot", InventorySnapshotListCreateView.as_view(), name="snapshot-list"),     # GET /snapshot
+    path("snapshot/<int:id>/", InventorySnapshotRetrieveView.as_view(), name="snapshot-detail"),  # GET /snapshot/{id}
+
 ]

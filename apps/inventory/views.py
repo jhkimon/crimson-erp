@@ -23,14 +23,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from .models import InventoryItem, ProductVariant, InventoryAdjustment, InventorySnapshot, InventorySnapshotItem
 from .serializers import (
     ProductOptionSerializer,
     ProductVariantSerializer,
     ProductVariantFullUpdateSerializer,
     InventoryItemWithVariantsSerializer,
     ProductVariantCreateSerializer,
-    InventoryAdjustmentSerializer
+    InventoryAdjustmentSerializer,
+    InventorySnapshotSerializer,
+    InventorySnapshotItemSerializer
 )
 from apps.orders.models import OrderItem
 from apps.supplier.models import SupplierVariant
@@ -787,3 +789,83 @@ class InventoryAdjustmentListView(generics.ListAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+    
+
+# --- Utils: 현재 재고 상태를 스냅샷으로 저장 ---
+@transaction.atomic
+def create_inventory_snapshot(reason: str = "", actor=None, meta: dict | None = None) -> InventorySnapshot:
+    snap = InventorySnapshot.objects.create(
+        reason=reason or "",
+        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        meta=meta or {},
+    )
+
+    # 현재 ProductVariant 전체를 조인해서 스냅샷 아이템으로 생성
+    qs = (
+        ProductVariant.objects
+        .select_related("product")  # InventoryItem
+        # .prefetch_related(...)    # 필요 시 공급처 등 프리패치
+    )
+
+    items = []
+    for v in qs:
+        p = v.product
+        items.append(InventorySnapshotItem(
+            snapshot=snap,
+            variant=v,
+            product_id=p.product_id,
+            name=p.name,
+            category=p.category,
+            variant_code=v.variant_code,
+            option=v.option,
+            stock=v.stock,
+            price=v.price,
+            cost_price=v.cost_price,
+            order_count=v.order_count,
+            return_count=v.return_count,
+            sales=getattr(v, "sales", 0),
+        ))
+    InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
+    return snap
+
+
+class InventorySnapshotListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /snapshot   : 스냅샷 목록(메타만; items 제외)
+    POST /snapshot   : 현재 재고 상태 스냅샷 생성
+    """
+    queryset = InventorySnapshot.objects.order_by("-created_at")
+    serializer_class = InventorySnapshotSerializer
+
+    # 목록에선 items를 빼서 가볍게 반환
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        # PageNumberPagination 사용 시 'results' 키, 아니면 전체 리스트
+        if isinstance(response.data, dict) and "results" in response.data:
+            for obj in response.data["results"]:
+                obj.pop("items", None)
+        else:
+            # pagination 미사용 시
+            for obj in response.data:
+                obj.pop("items", None)
+        return response
+
+    # 생성은 커스텀 유틸 호출
+    def create(self, request, *args, **kwargs):
+        reason = request.data.get("reason", "")
+        meta = request.data.get("meta", {}) or {}
+
+        snap = create_inventory_snapshot(
+            reason=reason,
+            actor=request.user if request.user.is_authenticated else None,
+            meta=meta,
+        )
+        data = self.get_serializer(snap).data
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+# --- GET /snapshot/<id> : 스냅샷 단건(아이템 포함) ---
+class InventorySnapshotRetrieveView(generics.RetrieveAPIView):
+    serializer_class = InventorySnapshotSerializer
+    lookup_field = "id"
+    queryset = InventorySnapshot.objects.all()

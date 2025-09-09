@@ -1,6 +1,9 @@
 from rest_framework import serializers
-from .models import InventoryItem, ProductVariant, InventoryAdjustment
-from apps.supplier.models import SupplierVariant, Supplier
+from .models import (
+    InventoryItem, ProductVariant, 
+    InventoryAdjustment, InventorySnapshot, InventorySnapshotItem
+)
+from apps.supplier.models import SupplierVariant
 
 
 class ProductOptionSerializer(serializers.ModelSerializer):
@@ -221,3 +224,40 @@ class InventoryAdjustmentSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = fields
+
+class InventorySnapshotItemSerializer(serializers.ModelSerializer):
+    variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
+    option = serializers.CharField(source="variant.option", read_only=True)
+
+    class Meta:
+        model = InventorySnapshotItem
+        fields = [
+            "id",
+            "variant",        # FK id (nullable)
+            "product_id",
+            "name",
+            "category",
+            "variant_code",
+            "option",
+            "stock",
+            "price",
+            "cost_price",
+            "order_count",
+            "return_count",
+            "sales",
+        ]
+        read_only_fields = fields
+
+
+class InventorySnapshotSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+    items = InventorySnapshotItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InventorySnapshot
+        fields = ["id", "created_at", "reason", "actor_name", "meta", "items"]
+        
+    def get_actor_name(self, obj):
+            if obj.actor and obj.actor.first_name:
+                return obj.actor.first_name
+            return getattr(obj.actor, "username", None)
