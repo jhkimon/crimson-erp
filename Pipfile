@@ -27,6 +27,10 @@ pytest = ">=8.0.2"
 pytest-django = ">=4.8.0"
 factory-boy = ">=3.3.0"
 dj-database-url = ">=2.1.0"
+django-filter = "==25.1"
+xlrd = "==2.0.2"
+pandas = "*"
+openpyxl = "*"
 
 [dev-packages]
 

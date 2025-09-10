@@ -21,6 +21,11 @@ class Employee(AbstractUser):
         ('HR', 'hr')
     ]
 
+    GENDER_CHOICES = [
+        ('MALE', '남성'),
+        ('FEMALE', '여성'),
+    ]
+
     def default_allowed_tabs():
         return ['INVENTORY']
 
@@ -31,10 +36,12 @@ class Employee(AbstractUser):
     # 추가 필드만 정의
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='STAFF')
     contact = models.CharField(max_length=20, blank=True, null=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='denied')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='DENIED')
     hire_date = models.DateField(null=True, blank=True)
     annual_leave_days = models.PositiveIntegerField(default=24)
     allowed_tabs = models.JSONField(default=default_allowed_tabs, blank=True, help_text="사용자별 접근 허용 탭 목록")
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, null=True)
+    is_deleted = models.BooleanField(default=False)
 
     @property
     def remaining_leave_days(self):

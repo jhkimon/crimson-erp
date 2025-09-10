@@ -68,21 +68,21 @@ class ApproveStaffView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="STAFF 계정 상태 전환",
-        operation_description="MANAGER가 STAFF 계정을 승인하거나 비활성화할 수 있습니다.",
+        operation_summary="직원 계정 상태 전환 (STAFF/INTERN)",
+        operation_description="MANAGER가 STAFF 또는 INTERN 계정을 승인(APPROVED)하거나 거절(DENIED)할 수 있습니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "status"],
             properties={
                 "username": openapi.Schema(type=openapi.TYPE_STRING, description="STAFF 사용자 아이디", example="staff1"),
-                "status": openapi.Schema(type=openapi.TYPE_STRING, enum=["approved", "denied"], description="변경할 상태", example="denied"),
+                "status": openapi.Schema(type=openapi.TYPE_STRING, enum=["APPROVED", "DENIED"], description="변경할 상태", example="APPROVED"),
             }
         ),
         responses={
             200: "상태 변경 성공",
             400: "잘못된 요청",
             403: "권한 없음",
-            404: "STAFF 없음"
+            404: "사용자 없음"
         },
         security=[{"BearerAuth": []}],
     )
@@ -91,24 +91,30 @@ class ApproveStaffView(APIView):
             return Response({"error": "STAFF 상태 변경 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
 
         username = request.data.get("username")
-        new_status = request.data.get("status")
+        input_status = request.data.get("status")
 
-        if not username or new_status not in ["approved", "denied"]:
-            return Response({"error": "username과 유효한 status(approved/denied)가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+        if not username or not input_status:
+            return Response({"error": "username과 status가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 상태 값을 대소문자 무관하게 허용하고 내부적으로 대문자로 통일
+        normalized_status = str(input_status).upper()
+        if normalized_status not in ["APPROVED", "DENIED"]:
+            return Response({"error": "status는 APPROVED 또는 DENIED여야 합니다."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return Response({"error": "해당 사용자가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        if user.role != "STAFF":
-            return Response({"error": "해당 사용자는 STAFF가 아닙니다."}, status=status.HTTP_400_BAD_REQUEST)
+        # STAFF와 INTERN 모두 승인 대상 허용
+        if user.role not in ["STAFF", "INTERN"]:
+            return Response({"error": "해당 사용자는 STAFF 또는 INTERN이 아닙니다."}, status=status.HTTP_400_BAD_REQUEST)
 
         # 상태 전환
-        user.status = new_status
+        user.status = normalized_status
         user.save()
 
-        return Response({"message": f"{username} 계정이 {new_status} 상태로 변경되었습니다."}, status=status.HTTP_200_OK)
+        return Response({"message": f"{username} 계정이 {normalized_status} 상태로 변경되었습니다."}, status=status.HTTP_200_OK)
 
 # Login API
 from django.contrib.auth import authenticate, get_user_model
@@ -168,6 +174,13 @@ class LoginView(APIView):
         user = authenticate(username=username, password=password)
 
         if user is not None:
+            # 퇴사/비활성 및 소프트 삭제 계정 로그인 차단
+            if not user.is_active:
+                return Response({"error": "비활성화된 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
+
+            if getattr(user, "is_deleted", False):
+                return Response({"error": "삭제된 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
+
             if user.role == "STAFF" and user.status.upper() != "APPROVED":
                 return Response({"error": "승인되지 않은 STAFF 계정입니다."}, status=status.HTTP_403_FORBIDDEN)
 

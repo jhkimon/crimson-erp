@@ -7,7 +7,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         model = Employee
         fields = (
             'id', 'username', 'email', 'role', 'contact', 'status',
-            'first_name', 'is_active', 'hire_date', 'remaining_leave_days'
+            'first_name', 'is_active', 'hire_date', 'remaining_leave_days', 'gender'
         )
         read_only_fields = ('id', 'hire_date')
 
@@ -23,7 +23,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'role', 'contact', 'status',
             'first_name', 'is_active', 'hire_date',
             'annual_leave_days', 'allowed_tabs', 'remaining_leave_days',
-            'vacation_days', 'vacation_pending_days'
+            'vacation_days', 'vacation_pending_days', 'gender'
         )
 
     def get_remaining_leave_days(self, obj):
@@ -52,7 +52,7 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
         model = Employee
         fields = (
             'email', 'contact', 'is_active', 'first_name',
-            'annual_leave_days', 'allowed_tabs', 'hire_date', 'role'
+            'annual_leave_days', 'allowed_tabs', 'hire_date', 'role', 'gender', 'is_deleted'
         )
         extra_kwargs = {
             'email': {'required': False},
@@ -63,6 +63,8 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
             'allowed_tabs': {'required': False},
             'hire_date': {'required': False},
             'role': {'required': False},
+            'gender': {'required': False},
+            'is_deleted': {'required': False},
         }
 class VacationRequestSerializer(serializers.ModelSerializer):
     """휴가 신청 조회용 Serializer"""
