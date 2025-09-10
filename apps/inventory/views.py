@@ -27,7 +27,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import InventoryItem, ProductVariant, InventoryAdjustment, InventorySnapshot, InventorySnapshotItem
+from .models import (
+    InventoryItem,
+    ProductVariant,
+    InventoryAdjustment,
+    InventorySnapshot,
+    InventorySnapshotItem,
+)
 from .serializers import (
     ProductOptionSerializer,
     ProductVariantSerializer,
@@ -36,7 +42,7 @@ from .serializers import (
     ProductVariantCreateSerializer,
     InventoryAdjustmentSerializer,
     InventorySnapshotSerializer,
-    InventorySnapshotItemSerializer
+    InventorySnapshotItemSerializer,
 )
 from apps.orders.models import OrderItem
 from apps.supplier.models import SupplierVariant
@@ -93,6 +99,86 @@ class InventoryItemView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class InventoryAdjustmentListView(generics.ListAPIView):
+    """
+    GET: 재고 조정 이력 전체 조회 또는 품목별 조회
+    - variant_code로 필터 가능
+    - 최신순 정렬 (기본 10건 페이지네이션)
+    """
+
+    permission_classes = [AllowAny]
+    queryset = InventoryAdjustment.objects.select_related("variantproduct").all()
+    serializer_class = InventoryAdjustmentSerializer
+    filterset_class = InventoryAdjustmentFilter
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["variantvariant_code"]
+    ordering_fields = ["created_at"]
+    ordering = ["-created_at"]  # 최신순 기본 정렬
+
+    @swagger_auto_schema(
+        operation_summary="재고 조정 이력 조회",
+        tags=["inventory - Stock"],
+        operation_description="variant_code 기준 필터링 및 페이지네이션 지원",
+        manual_parameters=[
+            openapi.Parameter(
+                name="variant_code",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="조회할 variant_code (예: P00000YC000A)",
+            ),
+            openapi.Parameter(
+                name="page",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description="페이지 번호 (기본=1)",
+            ),
+        ],
+    )
+    def get(self, request, *args, kwargs):
+        return super().get(request, *args, kwargs)
+
+
+# --- Utils: 현재 재고 상태를 스냅샷으로 저장 ---
+@transaction.atomic
+def create_inventory_snapshot(
+    reason: str = "", actor=None, meta: dict | None = None
+) -> InventorySnapshot:
+    snap = InventorySnapshot.objects.create(
+        reason=reason or "",
+        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        meta=meta or {},
+    )
+
+    # 현재 ProductVariant 전체를 조인해서 스냅샷 아이템으로 생성
+    qs = (
+        ProductVariant.objects.select_related("product")  # InventoryItem
+        # .prefetch_related(...)    # 필요 시 공급처 등 프리패치
+    )
+
+    items = []
+    for v in qs:
+        p = v.product
+        items.append(
+            InventorySnapshotItem(
+                snapshot=snap,
+                variant=v,
+                product_id=p.product_id,
+                name=p.name,
+                category=p.category,
+                variant_code=v.variant_code,
+                option=v.option,
+                stock=v.stock,
+                price=v.price,
+                cost_price=v.cost_price,
+                order_count=v.order_count,
+                return_count=v.return_count,
+                sales=getattr(v, "sales", 0),
+            )
+        )
+    InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
+    return snap
+
+
 # 상품 CSV 업로드
 class ProductVariantCSVUploadView(APIView):
     permission_classes = [AllowAny]
@@ -118,26 +204,117 @@ class ProductVariantCSVUploadView(APIView):
             return "unknown"
 
     @swagger_auto_schema(
-        operation_summary="상품 XLSX 일괄 업로드",
-        operation_description="엑셀 파일을 업로드하여 상품 및 상세 품목 정보를 일괄 생성 또는 업데이트합니다.",
+        operation_summary="POS 데이터 업로드 (스냅샷 자동 생성)",
+        tags=["inventory - Upload"],
+        operation_description="""
+        **POS 데이터(xlsx/xls)를 업로드하여 재고를 업데이트합니다.**
+        
+        **자동 처리 프로세스:**
+        1. 업로드 전 현재 재고 상태를 스냅샷으로 자동 저장
+        2. 업로드된 데이터로 상품/재고 정보 덮어쓰기
+        3. 처리 결과 및 생성된 스냅샷 ID 반환
+        
+        **지원 파일 형식:**
+        - **상품 상세 시트**: 상품 품목코드, 옵션 컬럼 포함
+        - **매출 요약 시트**: 바코드, 매출건수 컬럼 포함
+        
+        **롤백 방법:**
+        - 문제가 생긴 경우 `POST /inventory/rollback/{snapshot_id}` 사용
+        - 업로드 전 상태로 완전 복원 가능
+        
+        **주의사항:**
+        - 이 작업은 기존 데이터를 덮어씁니다
+        - 반드시 백업된 스냅샷 ID를 기록해두세요
+        """,
         manual_parameters=[
             openapi.Parameter(
                 name="file",
                 in_=openapi.IN_FORM,
                 type=openapi.TYPE_FILE,
                 required=True,
-                description="업로드할 XLSX 파일",
-            )
+                description="업로드할 XLSX/XLS 파일",
+            ),
+            openapi.Parameter(
+                name="reason",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="업로드 사유 (선택사항)",
+            ),
         ],
-        responses={200: "성공", 400: "파일 에러 또는 유효성 오류"},
+        responses={
+            200: openapi.Response(
+                description="업로드 성공",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "message": openapi.Schema(
+                            type=openapi.TYPE_STRING, example="POS 데이터 업로드 완료"
+                        ),
+                        "snapshot_id": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=123,
+                            description="업로드 전 생성된 스냅샷 ID",
+                        ),
+                        "batch_id": openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example="20250911-abc123",
+                            description="업로드 배치 ID",
+                        ),
+                        "type": openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example="variant_detail",
+                            description="처리된 시트 타입",
+                        ),
+                        "created_count": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=50,
+                            description="신규 생성된 상품 수",
+                        ),
+                        "updated_count": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=100,
+                            description="업데이트된 상품 수",
+                        ),
+                        "errors": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Items(type=openapi.TYPE_STRING),
+                            description="처리 오류 목록",
+                        ),
+                    },
+                ),
+            ),
+            400: openapi.Response(
+                description="파일 오류 또는 유효성 검증 실패",
+                examples={
+                    "application/json": {
+                        "error": "엑셀 파일을 읽을 수 없습니다: Invalid file format"
+                    }
+                },
+            ),
+        },
     )
     def post(self, request):
         excel_file = request.FILES.get("file")
+        reason = request.data.get("reason", "POS 데이터 업로드")
+
         if not excel_file:
             return Response(
                 {"error": "파일이 첨부되지 않았습니다."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # 1. 업로드 전 현재 재고 상태 스냅샷 생성
+        snapshot = create_inventory_snapshot(
+            reason=f"업로드 전 백업 - {reason}",
+            actor=request.user if request.user.is_authenticated else None,
+            meta={
+                "filename": excel_file.name,
+                "filesize": excel_file.size,
+                "upload_reason": reason,
+                "upload_type": "pos_data",
+            },
+        )
 
         try:
             filename = excel_file.name
@@ -155,22 +332,34 @@ class ProductVariantCSVUploadView(APIView):
 
         sheet_type = self.infer_sheet_type(df)
 
-        if sheet_type == "variant_detail":
-            return self.process_variant_detail(df)
-        elif sheet_type == "sales_summary":
-            return self.process_sales_summary(df)
-        else:
-            return Response(
-                {"error": "파일 형식을 인식할 수 없습니다."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        try:
+            if sheet_type == "variant_detail":
+                resp = self.process_variant_detail(df)
+            elif sheet_type == "sales_summary":
+                resp = self.process_sales_summary(df)
+            else:
+                return Response(
+                    {
+                        "error": "파일 형식을 인식할 수 없습니다. '상품 품목코드' 또는 '바코드' 컬럼이 필요합니다."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        if resp.status_code == 200:
-            self._batch_commit()
-            data = resp.data if isinstance(resp.data, dict) else {}
-            data["batch_id"] = self._batch["batch_id"]
-            return Response(data, status=200)
-        return resp
+            if resp.status_code == 200:
+                self._batch_commit()
+                data = resp.data if isinstance(resp.data, dict) else {}
+                data["batch_id"] = self._batch["batch_id"]
+                data["snapshot_id"] = snapshot.id  # 스냅샷 ID 추가
+                data["message"] = "POS 데이터 업로드 완료"
+                return Response(data, status=200)
+            else:
+                return resp
+
+        except Exception as e:
+            return Response(
+                {"error": f"데이터 처리 중 오류가 발생했습니다: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def process_variant_detail(self, df):
         required_cols = [
@@ -1009,82 +1198,192 @@ class StockUpdateView(APIView):
             )
 
 
-############ 재고 조정
-class InventoryAdjustmentListView(generics.ListAPIView):
+############ POS 데이터 업로드 후 롤백
+class InventoryRollbackView(APIView):
     """
-    GET: 재고 조정 이력 전체 조회 또는 품목별 조회
-    - variant_code로 필터 가능
-    - 최신순 정렬 (기본 10건 페이지네이션)
+    POST /inventory/rollback/{id} : 특정 스냅샷으로 재고 롤백
     """
 
     permission_classes = [AllowAny]
-    queryset = InventoryAdjustment.objects.select_related("variant__product").all()
-    serializer_class = InventoryAdjustmentSerializer
-    filterset_class = InventoryAdjustmentFilter
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["variant__variant_code"]
-    ordering_fields = ["created_at"]
-    ordering = ["-created_at"]  # 최신순 기본 정렬
 
     @swagger_auto_schema(
-        operation_summary="재고 조정 이력 조회",
-        tags=["inventory - Stock"],
-        operation_description="variant_code 기준 필터링 및 페이지네이션 지원",
+        operation_summary="재고 롤백 (스냅샷 복원)",
+        tags=["inventory - Rollback"],
+        operation_description="""
+        **지정된 스냅샷 시점으로 재고를 되돌립니다.**
+        
+        **자동 처리 프로세스:**
+        1. 롤백 전 현재 재고 상태를 백업 스냅샷으로 자동 저장
+        2. 지정된 스냅샷의 재고 데이터로 ProductVariant 테이블 덮어쓰기
+        3. 처리 결과 및 백업 스냅샷 ID 반환
+        
+        **복원되는 데이터:**
+        - stock (재고)
+        - price (판매가)
+        - cost_price (원가)
+        - order_count (주문수량)
+        - return_count (반품수량)
+        
+        **사용 예시:**
+        - 잘못된 POS 업로드 후 이전 상태로 복원
+        - 실수로 변경된 재고 데이터 되돌리기
+        - 특정 시점의 재고 상태로 복구
+        
+        **주의사항:**
+        - 롤백 후에는 다시 되돌릴 수 없습니다 (새 백업 스냅샷 사용)
+        - variant_code가 존재하지 않는 항목은 건너뜁니다
+        """,
         manual_parameters=[
             openapi.Parameter(
-                name="variant_code",
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                description="조회할 variant_code (예: P00000YC000A)",
-            ),
-            openapi.Parameter(
-                name="page",
-                in_=openapi.IN_QUERY,
+                name="id",
+                in_=openapi.IN_PATH,
                 type=openapi.TYPE_INTEGER,
-                description="페이지 번호 (기본=1)",
-            ),
+                required=True,
+                description="롤백할 스냅샷 ID",
+            )
         ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "reason": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="롤백 사유",
+                    example="잘못된 POS 업로드 되돌리기",
+                ),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="롤백 성공",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "message": openapi.Schema(
+                            type=openapi.TYPE_STRING, example="롤백 완료"
+                        ),
+                        "rollback_snapshot_id": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=123,
+                            description="롤백한 스냅샷 ID",
+                        ),
+                        "backup_snapshot_id": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=124,
+                            description="롤백 전 생성된 백업 스냅샷 ID",
+                        ),
+                        "updated_count": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=450,
+                            description="업데이트된 상품 수",
+                        ),
+                        "skipped_count": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            example=5,
+                            description="존재하지 않아 건너뛴 상품 수",
+                        ),
+                        "rollback_date": openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example="2025-09-11T09:30:00+09:00",
+                            description="롤백한 스냅샷 생성일시",
+                        ),
+                    },
+                ),
+            ),
+            404: openapi.Response(
+                description="스냅샷을 찾을 수 없음",
+                examples={"application/json": {"error": "스냅샷을 찾을 수 없습니다."}},
+            ),
+            500: "롤백 처리 중 오류 발생",
+        },
     )
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
-    
+    def post(self, request, id):
+        try:
+            target_snapshot = InventorySnapshot.objects.get(id=id)
+        except InventorySnapshot.DoesNotExist:
+            return Response(
+                {"error": "스냅샷을 찾을 수 없습니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-# --- Utils: 현재 재고 상태를 스냅샷으로 저장 ---
-@transaction.atomic
-def create_inventory_snapshot(reason: str = "", actor=None, meta: dict | None = None) -> InventorySnapshot:
-    snap = InventorySnapshot.objects.create(
-        reason=reason or "",
-        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
-        meta=meta or {},
-    )
+        reason = request.data.get("reason", f"스냅샷 #{id}로 롤백")
 
-    # 현재 ProductVariant 전체를 조인해서 스냅샷 아이템으로 생성
-    qs = (
-        ProductVariant.objects
-        .select_related("product")  # InventoryItem
-        # .prefetch_related(...)    # 필요 시 공급처 등 프리패치
-    )
+        try:
+            with transaction.atomic():
+                # 1. 롤백 전 현재 상태 백업
+                backup_snapshot = create_inventory_snapshot(
+                    reason=f"롤백 전 백업 - {reason}",
+                    actor=request.user if request.user.is_authenticated else None,
+                    meta={
+                        "rollback_target_snapshot_id": id,
+                        "rollback_target_date": target_snapshot.created_at.isoformat(),
+                        "rollback_reason": reason,
+                        "operation_type": "rollback_backup",
+                    },
+                )
 
-    items = []
-    for v in qs:
-        p = v.product
-        items.append(InventorySnapshotItem(
-            snapshot=snap,
-            variant=v,
-            product_id=p.product_id,
-            name=p.name,
-            category=p.category,
-            variant_code=v.variant_code,
-            option=v.option,
-            stock=v.stock,
-            price=v.price,
-            cost_price=v.cost_price,
-            order_count=v.order_count,
-            return_count=v.return_count,
-            sales=getattr(v, "sales", 0),
-        ))
-    InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
-    return snap
+                # 2. 타겟 스냅샷 데이터로 ProductVariant 업데이트
+                updated_count, skipped_count = self._rollback_to_snapshot(
+                    target_snapshot
+                )
+
+                return Response(
+                    {
+                        "message": "롤백 완료",
+                        "rollback_snapshot_id": id,
+                        "backup_snapshot_id": backup_snapshot.id,
+                        "updated_count": updated_count,
+                        "skipped_count": skipped_count,
+                        "rollback_date": target_snapshot.created_at.isoformat(),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception as e:
+            return Response(
+                {"error": f"롤백 처리 중 오류가 발생했습니다: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _rollback_to_snapshot(self, snapshot):
+        """스냅샷 데이터로 ProductVariant 필드들을 업데이트"""
+        snapshot_items = snapshot.items.all()
+        updated_count = 0
+        skipped_count = 0
+
+        # 배치 업데이트를 위한 리스트
+        variants_to_update = []
+
+        for item in snapshot_items:
+            try:
+                # variant_code로 ProductVariant 찾기
+                variant = ProductVariant.objects.select_for_update().get(
+                    variant_code=item.variant_code
+                )
+
+                # 스냅샷 데이터로 필드 업데이트
+                variant.stock = item.stock
+                variant.price = item.price
+                variant.cost_price = item.cost_price
+                variant.order_count = item.order_count
+                variant.return_count = item.return_count
+
+                variants_to_update.append(variant)
+                updated_count += 1
+
+            except ProductVariant.DoesNotExist:
+                # 해당 variant_code가 더 이상 존재하지 않는 경우 건너뛰기
+                skipped_count += 1
+                continue
+
+        # 배치 업데이트 수행
+        if variants_to_update:
+            ProductVariant.objects.bulk_update(
+                variants_to_update,
+                ["stock", "price", "cost_price", "order_count", "return_count"],
+                batch_size=1000,
+            )
+
+        return updated_count, skipped_count
 
 
 class InventorySnapshotListCreateView(generics.ListCreateAPIView):
@@ -1092,6 +1391,7 @@ class InventorySnapshotListCreateView(generics.ListCreateAPIView):
     GET  /snapshot   : 스냅샷 목록(메타만; items 제외)
     POST /snapshot   : 현재 재고 상태 스냅샷 생성
     """
+
     queryset = InventorySnapshot.objects.order_by("-created_at")
     serializer_class = InventorySnapshotSerializer
 
@@ -1122,8 +1422,77 @@ class InventorySnapshotListCreateView(generics.ListCreateAPIView):
         return Response(data, status=status.HTTP_201_CREATED)
 
 
-# --- GET /snapshot/<id> : 스냅샷 단건(아이템 포함) ---
 class InventorySnapshotRetrieveView(generics.RetrieveAPIView):
+    """
+    GET /snapshot/<id> : 스냅샷 단건(아이템 포함) 조회
+    """
+
     serializer_class = InventorySnapshotSerializer
     lookup_field = "id"
     queryset = InventorySnapshot.objects.all()
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="재고 스냅샷 상세 조회",
+        tags=["inventory - Snapshot"],
+        operation_description="""
+        **특정 스냅샷의 상세 정보를 조회합니다.**
+        
+        **포함되는 데이터:**
+        - 스냅샷 메타정보 (생성일시, 사유, 수행자)
+        - 당시 모든 상품의 재고 상태 (items 배열)
+        - 각 상품별 재고, 가격, 주문/반품 수량 등
+        
+        **사용 예시:**
+        - 롤백 전 특정 시점의 재고 상태 확인
+        - 재고 변화 추적 및 분석
+        - 문제 발생 시점 데이터 검증
+        
+        **주의사항:**
+        - 큰 데이터가 포함되므로 필요할 때만 호출
+        - 목록 조회는 `GET /inventory/snapshot` 사용
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                name="id",
+                in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER,
+                required=True,
+                description="조회할 스냅샷 ID",
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description="스냅샷 상세 조회 성공",
+                examples={
+                    "application/json": {
+                        "id": 123,
+                        "created_at": "2025-09-11T10:15:00+09:00",
+                        "reason": "업로드 전 백업 - 9월 POS 데이터",
+                        "actor_name": "배연준",
+                        "meta": {"filename": "pos_0911.xlsx"},
+                        "items": [
+                            {
+                                "id": 1001,
+                                "variant_code": "P00000YC000A",
+                                "product_id": "P00000YC",
+                                "name": "방패 필통",
+                                "category": "문구",
+                                "option": "크림슨",
+                                "stock": 50,
+                                "price": 5900,
+                                "cost_price": 3000,
+                                "order_count": 10,
+                                "return_count": 1,
+                                "sales": 0,
+                            }
+                        ],
+                    }
+                },
+            ),
+            404: "스냅샷을 찾을 수 없음",
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        """스냅샷 상세 조회"""
+        return super().get(request, *args, **kwargs)
