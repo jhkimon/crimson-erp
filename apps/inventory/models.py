@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
 
 class InventoryItem(models.Model):
     product_id = models.CharField(max_length=50, unique=True, default="P00000")
@@ -85,71 +87,41 @@ class InventoryAdjustment(models.Model):
     def __str__(self):
         return f"Adjustment for {self.variant.variant_code}: {self.delta}"
 
-class ImportBatch(models.Model):
-    SHEET_VARIANT = 'variant_detail'
-    SHEET_SALES = 'sales_summary'
-    SHEET_CHOICES = [
-        (SHEET_VARIANT, 'Variant Detail'),
-        (SHEET_SALES, 'Sales Summary'),
-    ]
-
-    STATUS_APPLIED = 'applied'
-    STATUS_ROLLED_BACK = 'rolled_back'
-    STATUS_FAILED = 'failed'
-    STATUS_CHOICES = [
-        (STATUS_APPLIED, 'Applied'),
-        (STATUS_ROLLED_BACK, 'Rolled Back'),
-        (STATUS_FAILED, 'Failed'),
-    ]
-
-    file_name = models.CharField(max_length=255)
-    sheet_type = models.CharField(max_length=32, choices=SHEET_CHOICES)
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_APPLIED)
-    note = models.TextField(blank=True, default="")
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+class InventorySnapshot(models.Model):
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    reason = models.CharField(max_length=200, blank=True, help_text="스냅샷 사유 (예: POS 덮어쓰기 전)")
+    actor = models.ForeignKey(
+        getattr(settings, "AUTH_USER_MODEL", "auth.User"),
+        null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="inventory_snapshots",
     )
-
-    class Meta:
-        db_table = "import_batches"
-        ordering = ["-created_at"]
+    meta = models.JSONField(default=dict, blank=True)  # 요청 payload, 파일명 등 부가정보
 
     def __str__(self):
-        return f"Batch#{self.id} {self.sheet_type} ({self.file_name}) - {self.status}"
+        return f"Snapshot#{self.id} @ {self.created_at:%Y-%m-%d %H:%M:%S} ({self.reason}) by {actor_name}"
 
 
-class ImportChange(models.Model):
-    ACTION_CREATE_PRODUCT = 'create_product'
-    ACTION_UPDATE_PRODUCT = 'update_product'
-    ACTION_CREATE_VARIANT = 'create_variant'
-    ACTION_UPDATE_VARIANT = 'update_variant'
-    ACTION_CHOICES = [
-        (ACTION_CREATE_PRODUCT, 'Create Product'),
-        (ACTION_UPDATE_PRODUCT, 'Update Product'),
-        (ACTION_CREATE_VARIANT, 'Create Variant'),
-        (ACTION_UPDATE_VARIANT, 'Update Variant'),
-    ]
+class InventorySnapshotItem(models.Model):
+    snapshot = models.ForeignKey(InventorySnapshot, on_delete=models.CASCADE, related_name="items")
 
-    batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE, related_name='changes')
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name="+")
+    # 스냅샷 시점의 값(denormalized)
+    product_id   = models.CharField(max_length=32, db_index=True)
+    name         = models.CharField(max_length=255)
+    category     = models.CharField(max_length=64)
+    variant_code = models.CharField(max_length=64, db_index=True)
+    option       = models.CharField(max_length=255, blank=True)
 
-    # 어떤 대상이 변경됐는지 연결(없을 수도 있음: 스킵/실패 행 기록용)
-    product = models.ForeignKey('InventoryItem', null=True, blank=True, on_delete=models.SET_NULL)
-    variant = models.ForeignKey('ProductVariant', null=True, blank=True, on_delete=models.SET_NULL)
-
-    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
-
-    # 이전/이후 스냅샷, 가감치(옵션)
-    before = models.JSONField(null=True, blank=True)
-    after = models.JSONField(null=True, blank=True)
-    deltas = models.JSONField(null=True, blank=True)
-
-    # 엑셀 원본 행번호(1-based 등 가독용)
-    row_index = models.IntegerField(null=True, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
+    stock       = models.IntegerField()
+    price       = models.IntegerField()
+    cost_price  = models.IntegerField()
+    order_count = models.IntegerField(default=0)
+    return_count= models.IntegerField(default=0)
+    sales       = models.IntegerField(default=0)
 
     class Meta:
-        db_table = "import_changes"
-        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["snapshot", "variant_code"]),
+            models.Index(fields=["product_id"]),
+        ]

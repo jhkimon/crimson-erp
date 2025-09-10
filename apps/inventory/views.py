@@ -27,7 +27,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import InventoryItem, ProductVariant, InventoryAdjustment
+from .models import InventoryItem, ProductVariant, InventoryAdjustment, InventorySnapshot, InventorySnapshotItem
 from .serializers import (
     ProductOptionSerializer,
     ProductVariantSerializer,
@@ -35,6 +35,8 @@ from .serializers import (
     InventoryItemWithVariantsSerializer,
     ProductVariantCreateSerializer,
     InventoryAdjustmentSerializer,
+    InventorySnapshotSerializer,
+    InventorySnapshotItemSerializer
 )
 from apps.orders.models import OrderItem
 from apps.supplier.models import SupplierVariant
@@ -1045,74 +1047,83 @@ class InventoryAdjustmentListView(generics.ListAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+    
 
-
-###########CSV 업로드 후 롤백할 수 있는 엔드포인트 추가
-class ProductVariantUploadRollbackView(APIView):
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_summary="업로드 롤백",
-        operation_description="CSV 업로드 배치(batch_id) 단위로 변경을 되돌립니다.",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=["batch_id"],
-            properties={
-                "batch_id": openapi.Schema(
-                    type=openapi.TYPE_STRING, description="업로드 응답으로 받은 배치 ID"
-                ),
-            },
-        ),
-        responses={200: "Rollback completed", 404: "Batch not found"},
+# --- Utils: 현재 재고 상태를 스냅샷으로 저장 ---
+@transaction.atomic
+def create_inventory_snapshot(reason: str = "", actor=None, meta: dict | None = None) -> InventorySnapshot:
+    snap = InventorySnapshot.objects.create(
+        reason=reason or "",
+        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        meta=meta or {},
     )
-    def post(self, request):
-        batch_id = request.data.get("batch_id")
-        if not batch_id:
-            return Response({"error": "batch_id가 필요합니다."}, status=400)
 
-        path = os.path.join(
-            getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media")),
-            "import_backups",
-            f"{batch_id}.json",
+    # 현재 ProductVariant 전체를 조인해서 스냅샷 아이템으로 생성
+    qs = (
+        ProductVariant.objects
+        .select_related("product")  # InventoryItem
+        # .prefetch_related(...)    # 필요 시 공급처 등 프리패치
+    )
+
+    items = []
+    for v in qs:
+        p = v.product
+        items.append(InventorySnapshotItem(
+            snapshot=snap,
+            variant=v,
+            product_id=p.product_id,
+            name=p.name,
+            category=p.category,
+            variant_code=v.variant_code,
+            option=v.option,
+            stock=v.stock,
+            price=v.price,
+            cost_price=v.cost_price,
+            order_count=v.order_count,
+            return_count=v.return_count,
+            sales=getattr(v, "sales", 0),
+        ))
+    InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
+    return snap
+
+
+class InventorySnapshotListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /snapshot   : 스냅샷 목록(메타만; items 제외)
+    POST /snapshot   : 현재 재고 상태 스냅샷 생성
+    """
+    queryset = InventorySnapshot.objects.order_by("-created_at")
+    serializer_class = InventorySnapshotSerializer
+
+    # 목록에선 items를 빼서 가볍게 반환
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        # PageNumberPagination 사용 시 'results' 키, 아니면 전체 리스트
+        if isinstance(response.data, dict) and "results" in response.data:
+            for obj in response.data["results"]:
+                obj.pop("items", None)
+        else:
+            # pagination 미사용 시
+            for obj in response.data:
+                obj.pop("items", None)
+        return response
+
+    # 생성은 커스텀 유틸 호출
+    def create(self, request, *args, **kwargs):
+        reason = request.data.get("reason", "")
+        meta = request.data.get("meta", {}) or {}
+
+        snap = create_inventory_snapshot(
+            reason=reason,
+            actor=request.user if request.user.is_authenticated else None,
+            meta=meta,
         )
-        if not os.path.exists(path):
-            return Response(
-                {"error": "해당 batch_id의 스냅샷 파일이 없습니다."}, status=404
-            )
+        data = self.get_serializer(snap).data
+        return Response(data, status=status.HTTP_201_CREATED)
 
-        with open(path, encoding="utf-8") as f:
-            batch = json.load(f)
 
-        snaps = batch.get("snapshots", [])
-
-        # 역순 적용: 마지막 변경부터 되돌리기
-        with transaction.atomic():
-            for s in reversed(snaps):
-                action = s.get("action")
-                code = s.get("variant_code")
-                before = s.get("before")
-
-                if action == "create":
-                    # 업로드에서 '생성된' 레코드는 삭제
-                    ProductVariant.objects.filter(variant_code=code).delete()
-                elif action == "update":
-                    try:
-                        v = ProductVariant.objects.get(variant_code=code)
-                    except ProductVariant.DoesNotExist:
-                        # 없으면 패스 (이미 수동삭제되었을 수도)
-                        continue
-
-                    # before 값으로 복구 (ID/타임스탬프는 제외)
-                    for field, value in before.items():
-                        if field in ("id", "created_at", "updated_at"):
-                            continue
-                        if field == "product":
-                            # product는 FK id로 저장되어 있음
-                            setattr(v, "product_id", value)
-                        else:
-                            setattr(v, field, value)
-                    v.save()
-
-        return Response(
-            {"message": "Rollback completed", "batch_id": batch_id}, status=200
-        )
+# --- GET /snapshot/<id> : 스냅샷 단건(아이템 포함) ---
+class InventorySnapshotRetrieveView(generics.RetrieveAPIView):
+    serializer_class = InventorySnapshotSerializer
+    lookup_field = "id"
+    queryset = InventorySnapshot.objects.all()
