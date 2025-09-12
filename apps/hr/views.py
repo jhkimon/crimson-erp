@@ -34,7 +34,7 @@ class EmployeeListCreateView(APIView):
     )
     def get(self, request):
         """직원 목록 조회"""
-        employees = Employee.objects.all()
+        employees = Employee.objects.filter(is_deleted=False)
         serializer = EmployeeListSerializer(employees, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -50,13 +50,13 @@ class EmployeeDetailUpdateView(APIView):
     )
     def get(self, request, employee_id):
         """특정 직원 조회"""
-        employee = get_object_or_404(Employee, id=employee_id)
+        employee = get_object_or_404(Employee, id=employee_id, is_deleted=False)
         serializer = EmployeeDetailSerializer(employee)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     @swagger_auto_schema(
         operation_summary="직원 정보 수정 (HR 전용)",
-        operation_description="직원의 이름, 이메일, 연락처, 퇴사 여부, 연차일수, 권한 탭, 입사일, 직무를 수정합니다.",
+        operation_description="직원의 이름, 이메일, 연락처, 퇴사 여부, 연차일수, 권한 탭, 입사일, 직무, 삭제 여부를 수정합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
@@ -77,6 +77,17 @@ class EmployeeDetailUpdateView(APIView):
                     description="직무 구분",
                     enum=["MANAGER", "STAFF", "INTERN"],
                     example="STAFF"
+                ),
+                "is_deleted": openapi.Schema(
+                    type=openapi.TYPE_BOOLEAN,
+                    description="삭제 여부(소프트 삭제)",
+                    example=False
+                ),
+                "gender": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="성별",
+                    enum=["MALE", "FEMALE"],
+                    example="MALE"
                 )
             },
             required=[],
@@ -95,7 +106,7 @@ class EmployeeDetailUpdateView(APIView):
             response_serializer = EmployeeDetailSerializer(employee)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
 class VacationRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
