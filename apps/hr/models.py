@@ -90,4 +90,4 @@ class VacationRequest(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.employee.full_name} - {self.start_date}~{self.end_date} [{self.get_leave_type_display()} | {self.get_status_display()}]"
+        return f"{self.employee.first_name} - {self.start_date}~{self.end_date} [{self.get_leave_type_display()} | {self.get_status_display()}]"

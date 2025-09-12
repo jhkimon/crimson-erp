@@ -1,26 +1,52 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.filters import OrderingFilter
+from django.core.paginator import Paginator
+from apps.orders.filters import OrderFilter
 from rest_framework import status
 from apps.orders.models import Order, OrderItem
 from apps.inventory.models import ProductVariant
 from .serializers import OrderWriteSerializer, OrderReadSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
+from apps.utils.email_utils import send_order_created_email, send_order_approved_email
 
 class OrderListView(APIView):
     permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ['order_date', 'expected_delivery_date'] 
 
     @swagger_auto_schema(
-        operation_summary="전체 주문 보기",
-        operation_description="Get a list of all orders in the system.",
-        responses={200: OrderCompactSerializer(many=True)}
-    )
+            operation_summary="전체 주문 보기",
+            operation_description="필터링, 정렬, 페이지네이션이 가능한 주문 리스트",
+            manual_parameters=[
+                openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='정렬 필드 (order_date, expected_delivery_date)'),
+                openapi.Parameter('product_name', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='상품명'),
+                openapi.Parameter('supplier', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='공급업체 이름'),
+                openapi.Parameter('status', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='주문 상태'),
+                openapi.Parameter('start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date', description='조회 시작일 (예: 2025-07-01)'),
+                openapi.Parameter('end_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date',  description='조회 종료일 (예: 2025-08-01)'),
+                openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='페이지 번호 (default: 1)'),
+            ],
+            responses={200: OrderCompactSerializer(many=True)}
+        )
+    
     def get(self, request):
-        orders = Order.objects.all()
-        serializer = OrderCompactSerializer(orders, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        queryset = Order.objects.prefetch_related("items__variant__product").all()
+
+        for backend in self.filter_backends:
+            queryset = backend().filter_queryset(request, queryset, self)
+
+        paginator = PageNumberPagination()
+        paginator.page_size = 10
+        page = paginator.paginate_queryset(queryset, request, view=self)
+
+        serializer = OrderCompactSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     @swagger_auto_schema(
         operation_summary="주문 생성하기",
@@ -46,6 +72,7 @@ class OrderListView(APIView):
                             "variant_code": openapi.Schema(type=openapi.TYPE_STRING, example="P00000XN000A"),
                             "quantity": openapi.Schema(type=openapi.TYPE_INTEGER, example=100),
                             "unit_price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
+                            "unit": openapi.Schema(type=openapi.TYPE_STRING, example="EA"),
                             "remark": openapi.Schema(type=openapi.TYPE_STRING, example="박스 포장"),
                             "spec": openapi.Schema(type=openapi.TYPE_STRING, example="B급")
                         }
@@ -61,6 +88,7 @@ class OrderListView(APIView):
             order = serializer.save()
             # 응답은 읽기용으로 직렬화
             read_serializer = OrderReadSerializer(order)
+            send_order_created_email(order)
             return Response(read_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -141,6 +169,11 @@ class OrderDetailView(APIView):
                 "error": "이미 동일한 상태입니다. 상태를 변경하려면 다른 값을 입력하세요.",
                 "status": new_status
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+
+        # APPROVED 로 변경시.
+        if previous_status != "APPROVED" and new_status == "APPROVED":
+            send_order_approved_email(order)
     
 
         # 완료 X -> COMPLETED (재고 증가)
@@ -197,3 +230,35 @@ class OrderDetailView(APIView):
             "order": serializer.data,
             "stock_changes": stock_changes
         }, status=status.HTTP_200_OK)
+    
+class OrderExportView(APIView):
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ['order_date', 'expected_delivery_date']
+
+    @swagger_auto_schema(
+        operation_summary="전체 주문 Export (엑셀용)",
+        operation_description="필터링/정렬은 유지하며 pagination 없이 모든 주문 데이터를 반환합니다.",
+        manual_parameters=[
+            openapi.Parameter('ordering', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('product_name', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('supplier', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('status', openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter('start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date'),
+            openapi.Parameter('end_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='date'),
+        ],
+        responses={200: OrderCompactSerializer(many=True)}
+    )
+    def get(self, request):
+        queryset = Order.objects.prefetch_related("items__variant__product").all()
+
+        for backend in self.filter_backends:
+            queryset = backend().filter_queryset(request, queryset, self)
+
+        ordering = request.query_params.get("ordering")
+        if ordering:
+            queryset = queryset.order_by(ordering)
+
+        serializer = OrderCompactSerializer(queryset, many=True)
+        return Response(serializer.data, status=200)
