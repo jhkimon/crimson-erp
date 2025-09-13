@@ -117,7 +117,7 @@ class InventoryAdjustmentListView(generics.ListAPIView):
 
     @swagger_auto_schema(
         operation_summary="재고 조정 이력 조회",
-        tags=["inventory - Stock"],
+        tags=["inventory - Stock Adjust"],
         operation_description="variant_code 기준 필터링 및 페이지네이션 지원",
         manual_parameters=[
             openapi.Parameter(
@@ -1115,7 +1115,7 @@ class StockUpdateView(APIView):
 
     @swagger_auto_schema(
         operation_summary="재고량 수동 업데이트",
-        tags=["inventory - Stock"],
+        tags=["inventory - Stock Adjust"],
         operation_description="실사 재고량을 입력하여 재고를 업데이트하고 조정 이력을 자동 생성합니다.",
         manual_parameters=[
             openapi.Parameter(
@@ -1208,7 +1208,7 @@ class InventoryRollbackView(APIView):
 
     @swagger_auto_schema(
         operation_summary="재고 롤백 (스냅샷 복원)",
-        tags=["inventory - Rollback"],
+        tags=["inventory"],
         operation_description="""
         **지정된 스냅샷 시점으로 재고를 되돌립니다.**
         
@@ -1434,7 +1434,7 @@ class InventorySnapshotRetrieveView(generics.RetrieveAPIView):
 
     @swagger_auto_schema(
         operation_summary="재고 스냅샷 상세 조회",
-        tags=["inventory - Snapshot"],
+        tags=["inventory"],
         operation_description="""
         **특정 스냅샷의 상세 정보를 조회합니다.**
         

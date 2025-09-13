@@ -214,7 +214,7 @@ class InventoryAPITestCase(APITestCase):
 
         url = "/api/v1/inventory/variants/merge/"
 
-        # ✅ 정상 병합 요청
+        # 정상 병합 요청
         payload = {
             "target_variant_code": self.variant.variant_code,
             "source_variant_codes": [variant1.variant_code, variant2.variant_code]
