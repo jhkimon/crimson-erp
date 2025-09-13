@@ -107,11 +107,11 @@ class InventoryAdjustmentListView(generics.ListAPIView):
     """
 
     permission_classes = [AllowAny]
-    queryset = InventoryAdjustment.objects.select_related("variantproduct").all()
+    queryset = InventoryAdjustment.objects.select_related("variant").all()
     serializer_class = InventoryAdjustmentSerializer
     filterset_class = InventoryAdjustmentFilter
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["variantvariant_code"]
+    filterset_fields = ["variant__variant_code"]
     ordering_fields = ["created_at"]
     ordering = ["-created_at"]  # 최신순 기본 정렬
 
@@ -134,7 +134,7 @@ class InventoryAdjustmentListView(generics.ListAPIView):
             ),
         ],
     )
-    def get(self, request, *args, kwargs):
+    def get(self, request, *args, **kwargs):
         return super().get(request, *args, kwargs)
 
 
