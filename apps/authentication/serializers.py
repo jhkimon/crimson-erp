@@ -25,3 +25,10 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ["username", "email", "first_name", "contact", "role", "status"]
         read_only_fields = fields
+
+class PasswordChangeSerializer(serializers.Serializer):
+    """직원 비밀번호 변경용 Serializer (HR용)"""
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    class Meta:
+        fields = ('password',)

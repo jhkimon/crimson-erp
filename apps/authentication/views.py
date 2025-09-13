@@ -1,17 +1,17 @@
 from django.contrib.auth import authenticate, get_user_model
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import JSONParser
-from apps.authentication.serializers import RegisterSerializer, UserSerializer
+from apps.authentication.serializers import RegisterSerializer, UserSerializer, PasswordChangeSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-         
-User = get_user_model()
-
 from django.db import IntegrityError
+
+User = get_user_model()
 
 class SignupView(APIView):
     permission_classes = [AllowAny]
@@ -117,18 +117,6 @@ class ApproveStaffView(APIView):
         return Response({"message": f"{username} 계정이 {normalized_status} 상태로 변경되었습니다."}, status=status.HTTP_200_OK)
 
 # Login API
-from django.contrib.auth import authenticate, get_user_model
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from apps.authentication.serializers import UserSerializer  # 수정: UserSerializer import
-
-User = get_user_model()
-
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -199,7 +187,7 @@ class LoginView(APIView):
 
         return Response({"error": "존재하지 않는 계정입니다."}, status=status.HTTP_401_UNAUTHORIZED)
 
-# 🔹 Logout API
+# Logout API
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -231,3 +219,50 @@ class LogoutView(APIView):
             return Response({"message": "Logged out successfully"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
+        
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="비밀번호 변경 (본인 또는 매니저)",
+        operation_description="""
+        로그인한 본인의 비밀번호를 직접 변경하거나, 'MANAGER' 권한을 가진 사용자가 다른 직원의 비밀번호를 변경합니다.
+        - **일반 사용자:** URL의 employee_id에 자신의 ID를 넣어서 요청해야 합니다.
+        - **매니저:** URL의 employee_id에 대상 직원의 ID를 넣어 요청할 수 있습니다.
+        """,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "password": openapi.Schema(type=openapi.TYPE_STRING, description="새 비밀번호", example="new_strong_password!"),
+            },
+            required=["password"]
+        ),
+        responses={
+            200: openapi.Response(description="비밀번호가 성공적으로 변경되었습니다."),
+            400: "Bad Request - 유효하지 않은 데이터",
+            403: "Forbidden - 권한 없음",
+            404: "Not Found - 직원을 찾을 수 없음"
+        }
+    )
+    def put(self, request, employee_id):
+        # 1. 대상 직원을 찾음
+        target_user = get_object_or_404(User, id=employee_id, is_deleted=False)
+        
+        # 2. 권한 확인: 요청자가 매니저이거나, 대상이 본인인지 확인
+        if not (request.user.role == 'MANAGER' or request.user.id == target_user.id):
+            return Response(
+                {"error": "비밀번호를 변경할 권한이 없습니다."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # 3. Serializer를 통해 데이터 유효성 검사
+        serializer = PasswordChangeSerializer(data=request.data)
+        if serializer.is_valid():
+            # 4. Django의 set_password를 사용하여 안전하게 비밀번호 설정
+            new_password = serializer.validated_data['password']
+            target_user.set_password(new_password)
+            target_user.save()
+            
+            return Response({"message": f"사용자 '{target_user.username}'의 비밀번호가 성공적으로 변경되었습니다."}, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
