@@ -3,45 +3,53 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
 
-from apps.inventory.models import InventoryItem, ProductVariant, InventoryAdjustment
+from apps.inventory.models import (
+    InventoryItem,
+    ProductVariant,
+    InventoryAdjustment,
+    InventorySnapshot,
+    InventorySnapshotItem,
+)
+
 from apps.hr.models import Employee
 from .serializers import InventoryAdjustmentSerializer
 from django.core.files.uploadedfile import SimpleUploadedFile
 import pandas as pd
 
-
 class InventoryAPITestCase(APITestCase):
     def setUp(self):
-        # 직원(조정 생성자) 샘플
+        """모든 테스트에 필요한 데이터를 생성하도록 통합된 setUp 메서드"""
         self.user = Employee.objects.create_user(
             username="tester", email="tester@example.com", password="pass",
             first_name="테스터", role="STAFF", status="APPROVED"
         )
+        self.client.force_authenticate(user=self.user)
 
-        # 상품 및 Variant 샘플
         self.item = InventoryItem.objects.create(
-            product_id="PTEST01", name="테스트 상품", category="테스트카테고리"
+            product_id="PTEST00", name="테스트 상품", category="테스트카테고리"
         )
         self.variant = ProductVariant.objects.create(
-            product=self.item,
-            variant_code="PTEST01-001",
-            option="기본",
-            stock=10,
-            min_stock=5,
-            price=1000,
-            description="테스트용",
-            memo="",
-            cost_price=800,
-            order_count=2,
-            return_count=0
+            product=self.item, variant_code="PTEST00-001", option="기본",
+            stock=10, price=1000, cost_price=800, order_count=2, return_count=0
+        )
+        self.adjustment = InventoryAdjustment.objects.create(
+            variant=self.variant, delta=+3, reason="초기 적재", created_by=self.user.username
         )
 
-        # 기존 재고 조정 이력 하나 생성
-        self.adjustment = InventoryAdjustment.objects.create(
-            variant=self.variant,
-            delta=+3,
-            reason="초기 적재",
-            created_by=self.user.username
+        self.item1 = InventoryItem.objects.create(
+            product_id="PTEST01", name="테스트 상품 1", category="카테고리 A"
+        )
+        self.variant1 = ProductVariant.objects.create(
+            product=self.item1, variant_code="PTEST01-001", option="RED",
+            stock=100, price=1000, cost_price=500, order_count=10, return_count=1
+        )
+
+        self.item2 = InventoryItem.objects.create(
+            product_id="PTEST02", name="테스트 상품 2", category="카테고리 B"
+        )
+        self.variant2 = ProductVariant.objects.create(
+            product=self.item2, variant_code="PTEST02-002", option="BLUE",
+            stock=200, price=2000, cost_price=1500, order_count=20, return_count=2
         )
 
     def test_product_option_list(self):
@@ -214,7 +222,7 @@ class InventoryAPITestCase(APITestCase):
 
         url = "/api/v1/inventory/variants/merge/"
 
-        # ✅ 정상 병합 요청
+        # 정상 병합 요청
         payload = {
             "target_variant_code": self.variant.variant_code,
             "source_variant_codes": [variant1.variant_code, variant2.variant_code]
@@ -268,3 +276,85 @@ class InventoryAPITestCase(APITestCase):
         response = self.client.post(url, payload, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.data)
+
+    def test_create_and_retrieve_snapshot(self):
+        """POST /snapshot/ → 스냅샷 생성 및 GET /snapshot/<id>/ → 상세 조회 검증"""
+        # URL 이름 수정: "snapshot-list" (네임스페이스 없음)
+        create_url = reverse("snapshot-list")
+        reason_text = "정기 백업"
+        response = self.client.post(create_url, {"reason": reason_text}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(InventorySnapshot.objects.count(), 1)
+        
+        snapshot_id = response.data["id"]
+        snapshot = InventorySnapshot.objects.get(id=snapshot_id)
+        
+        self.assertEqual(snapshot.reason, reason_text)
+        self.assertEqual(snapshot.actor, self.user)
+        self.assertEqual(snapshot.items.count(), ProductVariant.objects.count())
+
+        # URL 이름 수정: "snapshot-detail" (네임스페이스 없음)
+        retrieve_url = reverse("snapshot-detail", kwargs={"id": snapshot_id})
+        response = self.client.get(retrieve_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("items", response.data)
+        
+        items_data = response.data["items"]
+        item1_snapshot_data = next(item for item in items_data if item["variant_code"] == self.variant1.variant_code)
+
+        self.assertEqual(item1_snapshot_data["stock"], self.variant1.stock)
+        self.assertEqual(item1_snapshot_data["price"], self.variant1.price)
+
+    def test_inventory_rollback_flow(self):
+        """스냅샷 생성 → 재고 변경 → 롤백 → 데이터 복원 및 백업 스냅샷 생성 검증"""
+        initial_snapshot = InventorySnapshot.objects.create(reason="초기 상태")
+        InventorySnapshotItem.objects.create(
+            snapshot=initial_snapshot, variant=self.variant1, variant_code=self.variant1.variant_code,
+            stock=100, price=1000, cost_price=500, order_count=10, return_count=1
+        )
+        InventorySnapshotItem.objects.create(
+            snapshot=initial_snapshot, variant=self.variant2, variant_code=self.variant2.variant_code,
+            stock=200, price=2000, cost_price=1500, order_count=20, return_count=2
+        )
+        self.assertEqual(InventorySnapshot.objects.count(), 1)
+
+        self.variant1.stock = 50
+        self.variant1.price = 1111
+        self.variant1.order_count = 15
+        self.variant1.save()
+        
+        self.variant2.stock = 250
+        self.variant2.price = 2222
+        self.variant2.order_count = 25
+        self.variant2.save()
+
+        # URL 이름 수정: "inventory-rollback" (네임스페이스 없음)
+        rollback_url = reverse("inventory-rollback", kwargs={"id": initial_snapshot.id})
+        response = self.client.post(rollback_url, {"reason": "테스트 롤백"}, format="json")
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "롤백 완료")
+        self.assertEqual(response.data["updated_count"], 2)
+        self.assertEqual(response.data["skipped_count"], 0)
+
+        self.variant1.refresh_from_db()
+        self.variant2.refresh_from_db()
+
+        self.assertEqual(self.variant1.stock, 100)
+        self.assertEqual(self.variant1.price, 1000)
+        self.assertEqual(self.variant1.order_count, 10)
+
+        self.assertEqual(self.variant2.stock, 200)
+        self.assertEqual(self.variant2.price, 2000)
+        self.assertEqual(self.variant2.order_count, 20)
+        
+        self.assertEqual(InventorySnapshot.objects.count(), 2)
+        backup_snapshot_id = response.data["backup_snapshot_id"]
+        backup_snapshot = InventorySnapshot.objects.get(id=backup_snapshot_id)
+        
+        self.assertIn("롤백 전 백업", backup_snapshot.reason)
+        
+        backup_item1_data = backup_snapshot.items.get(variant_code=self.variant1.variant_code)
+        self.assertEqual(backup_item1_data.stock, 50)
+        self.assertEqual(backup_item1_data.price, 1111)
