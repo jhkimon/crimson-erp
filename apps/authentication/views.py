@@ -68,8 +68,8 @@ class ApproveStaffView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="직원 계정 상태 전환 (STAFF/INTERN)",
-        operation_description="MANAGER가 STAFF 또는 INTERN 계정을 승인(APPROVED)하거나 거절(DENIED)할 수 있습니다.",
+        operation_summary="직원 계정 상태 전환 (STAFF/INTERN/MANAGER)",
+        operation_description="MANAGER가 STAFF, INTERN 또는 MANAGER 계정을 승인(APPROVED)하거나 거절(DENIED)할 수 있습니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["username", "status"],
@@ -106,9 +106,9 @@ class ApproveStaffView(APIView):
         except User.DoesNotExist:
             return Response({"error": "해당 사용자가 존재하지 않습니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        # STAFF와 INTERN 모두 승인 대상 허용
-        if user.role not in ["STAFF", "INTERN"]:
-            return Response({"error": "해당 사용자는 STAFF 또는 INTERN이 아닙니다."}, status=status.HTTP_400_BAD_REQUEST)
+        # STAFF / INTERN / MANAGER 모두 승인 대상 허용
+        if user.role not in ["STAFF", "INTERN", "MANAGER"]:
+            return Response({"error": "해당 사용자는 승인 대상(STAFF/INTERN/MANAGER)이 아닙니다."}, status=status.HTTP_400_BAD_REQUEST)
 
         # 상태 전환
         user.status = normalized_status
