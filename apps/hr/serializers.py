@@ -66,6 +66,7 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
             'gender': {'required': False},
             'is_deleted': {'required': False},
         }
+
 class VacationRequestSerializer(serializers.ModelSerializer):
     """휴가 신청 조회용 Serializer"""
     employee_name = serializers.CharField(source='employee.first_name', read_only=True)
@@ -85,3 +86,5 @@ class VacationRequestCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = VacationRequest
         fields = ['employee', 'leave_type', 'start_date', 'end_date', 'reason']
+
+    
