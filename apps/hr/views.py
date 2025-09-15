@@ -99,6 +99,10 @@ class EmployeeDetailUpdateView(APIView):
         }
     )
     def patch(self, request, employee_id):
+        # 관리자 권한(ROLE: MANAGER) 체크
+        if getattr(request.user, "role", None) != "MANAGER":
+            return Response({"error": "권한이 없습니다. 관리자만 수정할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+
         employee = get_object_or_404(Employee, id=employee_id)
         serializer = EmployeeUpdateSerializer(employee, data=request.data, partial=True)
         if serializer.is_valid():
