@@ -18,3 +18,5 @@ static/
 # Migrations (optional)
 */migrations/*.py
 */migrations/*.pyc
+
+.settings_local.py
