@@ -64,6 +64,31 @@ class ProductOptionListView(APIView):
         return Response(serializer.data)
 
 
+class InventoryCategoryListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="카테고리 목록 조회",
+        operation_description="InventoryItem에 등록된 카테고리 문자열의 고유 목록을 반환합니다.",
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_STRING),
+                description="카테고리 이름 리스트",
+                example=["문구", "도서", "의류"],
+            )
+        },
+    )
+    def get(self, request):
+        qs = (
+            InventoryItem.objects.exclude(category="")
+            .values_list("category", flat=True)
+            .distinct()
+        )
+        categories = sorted(list(qs))
+        return Response(categories, status=status.HTTP_200_OK)
+
+
 # 일부 조회 (Product ID 기준)
 class InventoryItemView(APIView):
     """
