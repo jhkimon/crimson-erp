@@ -51,6 +51,7 @@ class ProductVariant(models.Model):
     order_count = models.PositiveIntegerField(default=0)
     return_count = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    channels = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "product_variants"

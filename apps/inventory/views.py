@@ -432,6 +432,14 @@ class ProductVariantCSVUploadView(APIView):
                         variant.order_count += delta_order
                         variant.return_count += delta_return
                         variant.save()
+                        # 채널 태그: online 추가
+                        if isinstance(variant.channels, list):
+                            if "online" not in variant.channels:
+                                variant.channels.append("online")
+                                variant.save(update_fields=["channels"])
+                        else:
+                            variant.channels = ["online"]
+                            variant.save(update_fields=["channels"])
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
                         self._snapshot_before("create", variant_code=variant_code)
@@ -444,6 +452,7 @@ class ProductVariantCSVUploadView(APIView):
                             stock=(delta_stock - delta_order + delta_return),  # << 여기
                             order_count=delta_order,
                             return_count=delta_return,
+                            channels=["online"],
                         )
                         created.append(ProductVariantSerializer(variant).data)
                 except Exception as e:
@@ -573,6 +582,14 @@ class ProductVariantCSVUploadView(APIView):
                             stock=F("stock") - sales_count,
                         )
                         variant.refresh_from_db()  #
+                        # 채널 태그: offline 추가
+                        if isinstance(variant.channels, list):
+                            if "offline" not in variant.channels:
+                                variant.channels.append("offline")
+                                variant.save(update_fields=["channels"])
+                        else:
+                            variant.channels = ["offline"]
+                            variant.save(update_fields=["channels"])
                         created.append(ProductVariantSerializer(variant).data)
                     else:
                         self._snapshot_before("update", variant=variant)
@@ -583,6 +600,14 @@ class ProductVariantCSVUploadView(APIView):
                             stock=F("stock") - sales_count,
                         )
                         variant.refresh_from_db()
+                        # 채널 태그: offline 추가
+                        if isinstance(variant.channels, list):
+                            if "offline" not in variant.channels:
+                                variant.channels.append("offline")
+                                variant.save(update_fields=["channels"])
+                        else:
+                            variant.channels = ["offline"]
+                            variant.save(update_fields=["channels"])
                         updated.append(ProductVariantSerializer(variant).data)
 
                 except Exception as e:
@@ -792,6 +817,12 @@ class ProductVariantView(APIView):
                 type=openapi.TYPE_STRING,
                 description="상품 카테고리 (부분일치)",
             ),
+            openapi.Parameter(
+                "channel",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="채널 필터 (online/offline)",
+            ),
         ],
         responses={200: ProductVariantSerializer(many=True)},
     )
@@ -949,6 +980,12 @@ class ProductVariantExportView(APIView):
                 "category", in_=openapi.IN_QUERY, type=openapi.TYPE_STRING
             ),
             openapi.Parameter("ordering", openapi.IN_QUERY, type=openapi.TYPE_STRING),
+            openapi.Parameter(
+                "channel",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="채널 필터 (online/offline)",
+            ),
         ],
         responses={200: ProductVariantSerializer(many=True)},
     )
