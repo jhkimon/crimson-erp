@@ -26,6 +26,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     stock = serializers.IntegerField(read_only=True)
     sales = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    channels = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
         model = ProductVariant
@@ -44,7 +45,8 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             'order_count',          # 판매수량
             'return_count',          # 환불수량
             'sales',
-            'suppliers'             # 공급자명
+            'suppliers',            # 공급자명
+            'channels',             # 온라인/오프라인 태그
         ]
 
     def get_fields(self):
