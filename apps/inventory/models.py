@@ -4,6 +4,17 @@ from django.conf import settings
 from django.utils import timezone
 
 
+class InventoryCategory(models.Model):
+    name = models.CharField(max_length=64, unique=True)
+
+    class Meta:
+        db_table = "inventory_categories"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class InventoryItem(models.Model):
     product_id = models.CharField(max_length=50, unique=True, default="P00000")
     name = models.CharField(max_length=255)

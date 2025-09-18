@@ -33,6 +33,7 @@ from .models import (
     InventoryAdjustment,
     InventorySnapshot,
     InventorySnapshotItem,
+    InventoryCategory,
 )
 from .serializers import (
     ProductOptionSerializer,
@@ -80,13 +81,8 @@ class InventoryCategoryListView(APIView):
         },
     )
     def get(self, request):
-        qs = (
-            InventoryItem.objects.exclude(category="")
-            .values_list("category", flat=True)
-            .distinct()
-        )
-        categories = sorted(list(qs))
-        return Response(categories, status=status.HTTP_200_OK)
+        names = list(InventoryCategory.objects.values_list("name", flat=True))
+        return Response(names, status=status.HTTP_200_OK)
 
 
 # 일부 조회 (Product ID 기준)
@@ -574,6 +570,9 @@ class ProductVariantCSVUploadView(APIView):
                         product.name = name
                         product.category = category
                         product.save()
+                    # POS 데이터에 나온 분류명은 카테고리 테이블에도 반영
+                    if category:
+                        InventoryCategory.objects.get_or_create(name=category)
 
                     variant, variant_created = ProductVariant.objects.get_or_create(
                         product=product,
