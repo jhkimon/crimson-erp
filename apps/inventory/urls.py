@@ -17,7 +17,7 @@ from .views import (
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name="inventory_options"),
-    path("category", InventoryCategoryListView.as_view(), name="inventory-category"),
+    path("category/", InventoryCategoryListView.as_view(), name="inventory-category"),
     path("variants/", ProductVariantView.as_view(), name="variant"),
     path("variants/export/", ProductVariantExportView.as_view(), name="variant_export"),
     path(
