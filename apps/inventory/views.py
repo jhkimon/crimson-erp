@@ -33,6 +33,7 @@ from .models import (
     InventoryAdjustment,
     InventorySnapshot,
     InventorySnapshotItem,
+    InventoryCategory,
 )
 from .serializers import (
     ProductOptionSerializer,
@@ -62,6 +63,26 @@ class ProductOptionListView(APIView):
         products = InventoryItem.objects.all().only("product_id", "name")
         serializer = ProductOptionSerializer(products, many=True)
         return Response(serializer.data)
+
+
+class InventoryCategoryListView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="카테고리 목록 조회",
+        operation_description="InventoryItem에 등록된 카테고리 문자열의 고유 목록을 반환합니다.",
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_STRING),
+                description="카테고리 이름 리스트",
+                example=["문구", "도서", "의류"],
+            )
+        },
+    )
+    def get(self, request):
+        names = list(InventoryCategory.objects.values_list("name", flat=True))
+        return Response(names, status=status.HTTP_200_OK)
 
 
 # 일부 조회 (Product ID 기준)
@@ -558,6 +579,9 @@ class ProductVariantCSVUploadView(APIView):
                         product.name = name
                         product.category = category
                         product.save()
+                    # POS 데이터에 나온 분류명은 카테고리 테이블에도 반영
+                    if category:
+                        InventoryCategory.objects.get_or_create(name=category)
 
                     variant, variant_created = ProductVariant.objects.get_or_create(
                         product=product,
