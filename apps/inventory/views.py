@@ -1800,7 +1800,7 @@ class ProductMergeView(APIView):
         if offline_product:
             # 오프라인은 기본 variant 조회
             offline_variant = ProductVariant.objects.filter(
-                product=offline_product, option="기본"
+                product=offline_product
             ).first()
 
             merged_data["offline_data"] = {
@@ -1849,7 +1849,7 @@ class ProductMergeView(APIView):
             )
         elif offline_product:
             offline_variant = ProductVariant.objects.filter(
-                product=offline_product, option="기본"
+                product=offline_product
             ).first()
             if offline_variant:
                 merged_data["merged_summary"]["total_sales"] = (
@@ -1885,7 +1885,7 @@ class MergeableProductsListView(generics.ListAPIView):
 
                     # 오프라인 ProductVariant 확인
                     offline_variant = ProductVariant.objects.get(
-                        product__inventoryitem=item, option="기본"
+                        product__inventoryitem=item
                     )
 
                     mergeable_products.append(
@@ -1961,7 +1961,7 @@ class ProductMergeCreateView(generics.CreateAPIView):
 
                 # 3. 오프라인 ProductVariant 찾기 (option="기본")
                 offline_variant = get_object_or_404(
-                    ProductVariant, product__inventoryitem=offline_item, option="기본"
+                    ProductVariant, product__inventoryitem=offline_item
                 )
 
                 # 4. 데이터 병합 (오프라인 → 온라인)
@@ -2078,7 +2078,7 @@ class BatchProductMergeView(APIView):
                     offline_item = InventoryItem.objects.get(management_code=code)
                     online_variant = ProductVariant.objects.get(variant_code=code)
                     offline_variant = ProductVariant.objects.get(
-                        product__inventoryitem=offline_item, option="기본"
+                        product__inventoryitem=offline_item
                     )
 
                     # 데이터 병합
