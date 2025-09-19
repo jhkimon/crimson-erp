@@ -38,6 +38,8 @@ class ProductVariant(models.Model):
     price = models.PositiveIntegerField(default=0)
 
     description = models.TextField(blank=True, default="")
+    channels = models.JSONField(default=list, blank=True)
+
     memo = models.TextField(blank=True, default="")
     cost_price = models.PositiveIntegerField(default=0)
 

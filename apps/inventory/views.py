@@ -23,7 +23,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.generics import ListAPIView
 from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-
+from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
@@ -139,7 +139,7 @@ class InventoryAdjustmentListView(generics.ListAPIView):
         ],
     )
     def get(self, request, *args, **kwargs):
-        return super().get(request, *args, kwargs)
+        return super().get(request, *args, **kwargs)
 
 
 # --- Utils: 현재 재고 상태를 스냅샷으로 저장 ---
@@ -181,6 +181,64 @@ def create_inventory_snapshot(
         )
     InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
     return snap
+
+
+@transaction.atomic
+def create_recent_products_snapshot(
+    limit: int = 10, reason: str = "", actor=None, meta: dict | None = None
+) -> InventorySnapshot:
+    """최근 N개 상품만 스냅샷으로 저장"""
+    snap = InventorySnapshot.objects.create(
+        reason=reason or "",
+        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        meta=meta or {},
+    )
+
+    # 최근 생성된 상품 N개만 조회
+    recent_variants = ProductVariant.objects.select_related("product").order_by(
+        "-created_at"
+    )[:limit]
+
+    print(f"Recent variants count: {recent_variants.count()}")
+
+    items = []
+    for v in recent_variants:
+        p = v.product
+        items.append(
+            InventorySnapshotItem(
+                snapshot=snap,
+                variant=v,
+                product_id=p.product_id,
+                name=p.name,
+                category=p.category,
+                variant_code=v.variant_code,
+                option=v.option,
+                stock=v.stock,
+                price=v.price,
+                cost_price=v.cost_price,
+                order_count=v.order_count,
+                return_count=v.return_count,
+                sales=getattr(v, "sales", 0),
+            )
+        )
+    InventorySnapshotItem.objects.bulk_create(items, batch_size=1000)
+    return snap
+
+
+# 스냅샷 보관(최근 N개만 유지) - 특정 reason prefix로 범위 한정
+def enforce_snapshot_retention(limit: int = 10, reason_prefix: str | None = None):
+    qs = InventorySnapshot.objects.all()
+    if reason_prefix:
+        qs = qs.filter(reason__startswith=reason_prefix)
+
+    print(f"Total snapshots with prefix '{reason_prefix}': {qs.count()}")  # 디버깅
+
+    stale_ids = list(qs.order_by("-created_at").values_list("id", flat=True)[limit:])
+    print(f"Stale snapshot IDs to delete: {stale_ids}")  # 디버깅
+
+    if stale_ids:
+        deleted_count = InventorySnapshot.objects.filter(id__in=stale_ids).delete()
+        print(f"Deleted snapshots: {deleted_count}")  # 디버깅
 
 
 # 상품 CSV 업로드
@@ -721,6 +779,20 @@ class ProductVariantView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # 신상품 등록 전 최근 10개 상품만 스냅샷
+        SNAP_PREFIX = "신규 상품 등록 전 백업"
+        create_recent_products_snapshot(
+            limit=10,
+            reason=f"{SNAP_PREFIX} - {product_id}",
+            actor=request.user if request.user.is_authenticated else None,
+            meta={
+                "endpoint": "POST /inventory/variants/",
+                "payload_keys": sorted(list(request.data.keys())),
+                "product_id": product_id,
+                "product_name": product_name,
+            },
+        )
+
         product, created = InventoryItem.objects.get_or_create(
             product_id=product_id, defaults={"name": product_name}
         )
@@ -737,6 +809,8 @@ class ProductVariantView(APIView):
         )
         if serializer.is_valid():
             serializer.save(variant_code=variant_code)
+            # 최근 10개만 유지
+            enforce_snapshot_retention(limit=10, reason_prefix=SNAP_PREFIX)
             return Response(
                 ProductVariantSerializer(serializer.instance).data,
                 status=status.HTTP_201_CREATED,
@@ -1819,12 +1893,10 @@ class MergeableProductsListView(generics.ListAPIView):
                             "management_code": item.management_code,
                             "offline_product_name": item.name,
                             "online_product_name": online_variant.product.name,
-                            "offline_stock": offline_variant.stock_quantity or 0,
-                            "online_stock": online_variant.stock_quantity or 0,
-                            "total_stock_after_merge": (
-                                offline_variant.stock_quantity or 0
-                            )
-                            + (online_variant.stock_quantity or 0),
+                            "offline_stock": offline_variant.stock or 0,
+                            "online_stock": online_variant.stock or 0,
+                            "total_stock_after_merge": (offline_variant.stock or 0)
+                            + (online_variant.stock or 0),
                         }
                     )
 
@@ -1894,13 +1966,16 @@ class ProductMergeCreateView(generics.CreateAPIView):
 
                 # 4. 데이터 병합 (오프라인 → 온라인)
                 # 재고 수량 합산
-                online_variant.stock_quantity = (online_variant.stock_quantity or 0) + (
-                    offline_variant.stock_quantity or 0
+                online_variant.stock = (online_variant.stock or 0) + (
+                    offline_variant.stock or 0
                 )
 
                 # 판매 수량 합산
-                online_variant.sales_quantity = (online_variant.sales_quantity or 0) + (
-                    offline_variant.sales_quantity or 0
+                online_variant.order_count = (online_variant.order_count or 0) + (
+                    offline_variant.order_count or 0
+                )
+                online_variant.return_count = (online_variant.return_count or 0) + (
+                    offline_variant.return_count or 0
                 )
 
                 # 가격 정보 (오프라인이 있으면 우선 적용, 없으면 온라인 유지)
@@ -1908,8 +1983,6 @@ class ProductMergeCreateView(generics.CreateAPIView):
                     online_variant.price = offline_variant.price
                 if offline_variant.cost_price:
                     online_variant.cost_price = offline_variant.cost_price
-                if offline_variant.sale_price:
-                    online_variant.sale_price = offline_variant.sale_price
 
                 # 5. 온라인 Product명을 오프라인 InventoryItem명으로 변경
                 online_product = online_variant.product
@@ -1941,8 +2014,9 @@ class ProductMergeCreateView(generics.CreateAPIView):
                         "merged_product": {
                             "variant_code": online_variant.variant_code,
                             "product_name": online_product.name,
-                            "stock_quantity": online_variant.stock_quantity,
-                            "sales_quantity": online_variant.sales_quantity,
+                            "stock": online_variant.stock,  # ← 수정
+                            "order_count": online_variant.order_count,  # ← 추가(선택)
+                            "return_count": online_variant.return_count,  # ← 추가(선택)
                             "price": (
                                 str(online_variant.price)
                                 if online_variant.price
@@ -2008,19 +2082,20 @@ class BatchProductMergeView(APIView):
                     )
 
                     # 데이터 병합
-                    online_variant.stock_quantity = (
-                        online_variant.stock_quantity or 0
-                    ) + (offline_variant.stock_quantity or 0)
-                    online_variant.sales_quantity = (
-                        online_variant.sales_quantity or 0
-                    ) + (offline_variant.sales_quantity or 0)
+                    online_variant.stock = (online_variant.stock or 0) + (
+                        offline_variant.stock or 0
+                    )
+                    online_variant.order_count = (online_variant.order_count or 0) + (
+                        offline_variant.order_count or 0
+                    )
+                    online_variant.return_count = (online_variant.return_count or 0) + (
+                        offline_variant.return_count or 0
+                    )
 
                     if offline_variant.price:
                         online_variant.price = offline_variant.price
                     if offline_variant.cost_price:
                         online_variant.cost_price = offline_variant.cost_price
-                    if offline_variant.sale_price:
-                        online_variant.sale_price = offline_variant.sale_price
 
                     # 상품명 변경
                     online_product = online_variant.product
