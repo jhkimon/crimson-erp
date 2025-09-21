@@ -86,5 +86,21 @@ class VacationRequestCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = VacationRequest
         fields = ['employee', 'leave_type', 'start_date', 'end_date', 'reason']
+    
+    def validate(self, data):
+        """휴가 신청 유효성 검사"""
+        leave_type = data.get('leave_type')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        # 반차 검증 (기존 로직 유지)
+        if leave_type in ['HALF_DAY_AM', 'HALF_DAY_PM'] and start_date != end_date:
+            raise serializers.ValidationError("반차는 시작일과 종료일이 같아야 합니다.")
+        
+        # 일반적인 날짜 검증
+        if start_date > end_date:
+            raise serializers.ValidationError("종료일은 시작일보다 빠를 수 없습니다.")
+        
+        return data
 
     
