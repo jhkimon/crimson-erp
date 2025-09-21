@@ -116,16 +116,43 @@ class VacationRequestView(APIView):
 
     @swagger_auto_schema(
         operation_summary="휴가 신청 목록 조회",
+        operation_description="휴가 신청 및 근무 배정 목록을 조회합니다. 쿼리 파라미터로 필터링 가능합니다.",
+        manual_parameters=[
+            openapi.Parameter('leave_type', openapi.IN_QUERY, description="휴가 유형 필터 (예: VACATION, WORK)", type=openapi.TYPE_STRING),
+            openapi.Parameter('employee', openapi.IN_QUERY, description="직원 ID 필터", type=openapi.TYPE_INTEGER),
+            openapi.Parameter('start_date', openapi.IN_QUERY, description="시작일 필터 (YYYY-MM-DD)", type=openapi.TYPE_STRING, format="date"),
+            openapi.Parameter('end_date', openapi.IN_QUERY, description="종료일 필터 (YYYY-MM-DD)", type=openapi.TYPE_STRING, format="date"),
+        ],
         responses={200: VacationRequestSerializer(many=True)}
     )
     def get(self, request):
-        """휴가 신청 전체 조회"""
-        requests = VacationRequest.objects.select_related('employee').all()
-        serializer = VacationRequestSerializer(requests, many=True)
+        """휴가 신청 전체 조회 (필터링 지원)"""
+        queryset = VacationRequest.objects.select_related('employee').all()
+        
+        # 쿼리 파라미터 필터링
+        leave_type = request.query_params.get('leave_type')
+        employee_id = request.query_params.get('employee')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        if leave_type:
+            queryset = queryset.filter(leave_type=leave_type)
+        
+        if employee_id:
+            queryset = queryset.filter(employee_id=employee_id)
+        
+        if start_date:
+            queryset = queryset.filter(start_date__gte=start_date)
+        
+        if end_date:
+            queryset = queryset.filter(end_date__lte=end_date)
+        
+        serializer = VacationRequestSerializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_summary="휴가 신청 등록",
+        operation_description="휴가 신청을 등록합니다. WORK 타입은 관리자만 생성 가능하며 자동으로 승인됩니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["employee", "leave_type", "start_date", "end_date"],
@@ -133,8 +160,8 @@ class VacationRequestView(APIView):
                 "employee": openapi.Schema(type=openapi.TYPE_INTEGER, description="직원 ID", example=168),
                 "leave_type": openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="휴가 유형",
-                    enum=["VACATION", "HALF_DAY_AM", "HALF_DAY_PM", "SICK", "OTHER"],
+                    description="휴가 유형 (WORK는 관리자만 생성 가능)",
+                    enum=["VACATION", "HALF_DAY_AM", "HALF_DAY_PM", "SICK", "OTHER", "WORK"],
                     example="VACATION"
                 ),
                 "start_date": openapi.Schema(type=openapi.TYPE_STRING, format="date", example="2025-08-01"),
@@ -144,7 +171,8 @@ class VacationRequestView(APIView):
         ),
         responses={
             201: VacationRequestSerializer(),
-            400: "Bad Request"
+            400: "Bad Request",
+            403: "Forbidden"
         }
     )
     def post(self, request):
@@ -153,22 +181,39 @@ class VacationRequestView(APIView):
         if serializer.is_valid():
             data = serializer.validated_data
             leave_type = data.get("leave_type")
+            employee = data.get("employee")
             start_date = data.get("start_date")
             end_date = data.get("end_date")
 
-            if leave_type in ["HALF_DAY_AM", "HALF_DAY_PM"] and start_date != end_date:
+            # WORK 타입은 관리자만 생성 가능
+            if leave_type == "WORK" and getattr(request.user, "role", None) != "MANAGER":
                 return Response(
-                    {"error": "반차는 시작일과 종료일이 같아야 합니다."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "근무 배정은 관리자만 생성할 수 있습니다."},
+                    status=status.HTTP_403_FORBIDDEN
                 )
 
-            if leave_type == "VACATION" and start_date > end_date:
-                return Response(
-                    {"error": "종료일은 시작일보다 빠를 수 없습니다."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # 중복 일정 검사 (WORK와 APPROVED된 다른 휴가가 겹치는지 확인)
+            if leave_type == "WORK":
+                overlapping_requests = VacationRequest.objects.filter(
+                    employee=employee,
+                    status='APPROVED',
+                    start_date__lte=end_date,
+                    end_date__gte=start_date
+                ).exclude(leave_type='WORK')
+                
+                if overlapping_requests.exists():
+                    return Response(
+                        {"error": "해당 기간에 이미 승인된 휴가가 있어 근무 배정할 수 없습니다."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
-            request_instance = serializer.save()
+            # 기존 검증 로직은 serializer의 validate 메서드로 이동됨
+            # WORK 타입이면 자동 승인
+            if leave_type == "WORK":
+                request_instance = serializer.save(status='APPROVED', reviewed_at=timezone.now())
+            else:
+                request_instance = serializer.save()
+            
             response_serializer = VacationRequestSerializer(request_instance)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         
@@ -180,7 +225,7 @@ class VacationRequestReviewView(APIView):
 
     @swagger_auto_schema(
         operation_summary="휴가 신청 취소/승인/거절",
-        operation_description="휴가 신청 상태를 승인(APPROVED), 거절(REJECTED), 대기중(PENDING), 취소(CANCELLED) 중 하나로 변경합니다.",
+        operation_description="휴가 신청 상태를 승인(APPROVED), 거절(REJECTED), 대기중(PENDING), 취소(CANCELLED) 중 하나로 변경합니다. WORK 타입은 생성 시 자동 승인되므로 일반적으로 이 API를 사용할 필요가 없습니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
