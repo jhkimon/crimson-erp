@@ -38,25 +38,27 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     stock = serializers.IntegerField(read_only=True)
     sales = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    channels = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
         model = ProductVariant
         fields = [
-            "product_id",  # product_id
-            "name",  # 상품명
-            "category",  # 상품 카테고리
-            "variant_code",  # variant_code
-            "option",  # 옵션
-            "stock",  # 재고량
-            "price",  # 가격
-            "min_stock",  # 최소재고
-            "description",  # 상품설명
-            "memo",  # 메모
-            "cost_price",  # 원가
-            "order_count",  # 판매수량
-            "return_count",  # 환불수량
-            "sales",
-            "suppliers",  # 공급자명
+            'product_id',    # product_id
+            'name',             # 상품명
+            'category',         # 상품 카테고리
+            'variant_code',         # variant_code
+            'option',               # 옵션
+            'stock',                # 재고량
+            'price',                # 가격
+            'min_stock',             # 최소재고
+            'description',          # 상품설명
+            'memo',                  # 메모
+            'cost_price',           # 원가
+            'order_count',          # 판매수량
+            'return_count',          # 환불수량
+            'sales',
+            'suppliers',            # 공급자명
+            'channels',             # 온라인/오프라인 태그
         ]
 
     def get_fields(self):

@@ -68,6 +68,7 @@ class VacationRequest(models.Model):
         ('HALF_DAY_PM', '오후 반차'),
         ('SICK', '병가'),
         ('OTHER', '기타'),
+        ('WORK', '근무'),
     ]
 
     STATUS_CHOICES = [

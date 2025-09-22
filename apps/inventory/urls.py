@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     ProductOptionListView,
+    InventoryCategoryListView,
     ProductVariantDetailView,
     ProductVariantExportView,
     InventoryItemView,
@@ -21,6 +22,7 @@ from .views import (
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name="inventory_options"),
+    path("category/", InventoryCategoryListView.as_view(), name="inventory-category"),
     path("variants/", ProductVariantView.as_view(), name="variant"),
     path("variants/export/", ProductVariantExportView.as_view(), name="variant_export"),
     path(
