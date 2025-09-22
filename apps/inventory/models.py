@@ -18,6 +18,9 @@ class InventoryCategory(models.Model):
 class InventoryItem(models.Model):
     product_id = models.CharField(max_length=50, unique=True, default="P00000")
     name = models.CharField(max_length=255)
+    management_code = models.CharField(
+        max_length=50, blank=True, null=True, help_text="온라인 품목코드와 매칭용"
+    )
     category = models.CharField(
         max_length=50,
         default="일반",
@@ -46,6 +49,8 @@ class ProductVariant(models.Model):
     price = models.PositiveIntegerField(default=0)
 
     description = models.TextField(blank=True, default="")
+    channels = models.JSONField(default=list, blank=True)
+
     memo = models.TextField(blank=True, default="")
     cost_price = models.PositiveIntegerField(default=0)
 
