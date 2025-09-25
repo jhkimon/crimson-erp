@@ -781,6 +781,12 @@ class ProductVariantView(APIView):
                 "memo": openapi.Schema(
                     type=openapi.TYPE_STRING, description="메모", example="23FW 신상품"
                 ),
+                "channels": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description="판매 채널 태그",
+                    items=openapi.Items(type=openapi.TYPE_STRING),
+                    example=["online", "offline"],
+                ),
                 "suppliers": openapi.Schema(
                     type=openapi.TYPE_ARRAY,
                     description="공급자 매핑 목록",
@@ -811,6 +817,7 @@ class ProductVariantView(APIView):
                 "min_stock": 5,
                 "description": "튼튼한 크림슨 컬러 방패 필통",
                 "memo": "23FW 신상품",
+                "channels": ["online", "offline"],
                 "suppliers": [
                     {"name": "넥스트물류", "cost_price": 3016, "is_primary": True}
                 ],
