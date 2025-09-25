@@ -183,10 +183,15 @@ class InventoryAPITestCase(APITestCase):
         upload_file = SimpleUploadedFile("variants.xlsx", buffer.read(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         url = "/api/v1/inventory/upload/"
-        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        response = self.client.post(
+            url,
+            {"file": upload_file, "channel": "online"},
+            format="multipart",
+        )
         self.assertEqual(response.status_code, 200)
         self.assertIn("created_count", response.data)
         self.assertGreaterEqual(response.data["created_count"], 1)
+        self.assertEqual(response.data.get("channel"), "online")
 
     def test_sales_summary_upload_excel(self):
         df = pd.DataFrame([{
@@ -202,7 +207,11 @@ class InventoryAPITestCase(APITestCase):
         upload_file = SimpleUploadedFile("sales_summary.xlsx", buffer.read(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         url = "/api/v1/inventory/upload/"
-        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        response = self.client.post(
+            url,
+            {"file": upload_file, "channel": "offline"},
+            format="multipart",
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["type"], "sales_summary")
@@ -210,6 +219,7 @@ class InventoryAPITestCase(APITestCase):
         self.assertIn("updated_count", response.data)
         self.assertIn("errors", response.data)
         self.assertGreaterEqual(response.data["created_count"] + response.data["updated_count"], 1)
+        self.assertEqual(response.data.get("channel"), "offline")
 
     def test_variant_merge(self):
         # 병합 대상 및 소스 생성
