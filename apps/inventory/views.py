@@ -318,6 +318,14 @@ class ProductVariantCSVUploadView(APIView):
                 description="업로드할 XLSX/XLS 파일",
             ),
             openapi.Parameter(
+                name="channel",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_STRING,
+                enum=["online", "offline"],
+                required=True,
+                description="업로드 데이터의 채널 (online/offline)",
+            ),
+            openapi.Parameter(
                 name="reason",
                 in_=openapi.IN_FORM,
                 type=openapi.TYPE_STRING,
@@ -348,6 +356,11 @@ class ProductVariantCSVUploadView(APIView):
                             type=openapi.TYPE_STRING,
                             example="variant_detail",
                             description="처리된 시트 타입",
+                        ),
+                        "channel": openapi.Schema(
+                            type=openapi.TYPE_STRING,
+                            example="online",
+                            description="업로드 시 지정한 채널",
                         ),
                         "created_count": openapi.Schema(
                             type=openapi.TYPE_INTEGER,
@@ -380,6 +393,20 @@ class ProductVariantCSVUploadView(APIView):
     def post(self, request):
         excel_file = request.FILES.get("file")
         reason = request.data.get("reason", "POS 데이터 업로드")
+        channel_input = request.data.get("channel")
+
+        if channel_input is None:
+            return Response(
+                {"error": "channel 값은 필수입니다. (online/offline)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        channel = str(channel_input).strip().lower()
+        if channel not in {"online", "offline"}:
+            return Response(
+                {"error": "channel 값은 'online' 또는 'offline'이어야 합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not excel_file:
             return Response(
@@ -387,21 +414,26 @@ class ProductVariantCSVUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        annotated_reason = reason
+        if channel:
+            annotated_reason = f"{reason} ({channel})"
+
         # 1. 업로드 전 현재 재고 상태 스냅샷 생성
         snapshot = create_inventory_snapshot(
-            reason=f"업로드 전 백업 - {reason}",
+            reason=f"업로드 전 백업 - {annotated_reason}",
             actor=request.user if request.user.is_authenticated else None,
             meta={
                 "filename": excel_file.name,
                 "filesize": excel_file.size,
                 "upload_reason": reason,
                 "upload_type": "pos_data",
+                "upload_channel": channel,
             },
         )
 
         try:
             filename = excel_file.name
-            batch_id = self._batch_start(filename)
+            batch_id = self._batch_start(filename, channel)
 
             if filename.endswith(".xls"):
                 df = pd.read_excel(excel_file, engine="xlrd")
@@ -434,6 +466,7 @@ class ProductVariantCSVUploadView(APIView):
                 data["batch_id"] = self._batch["batch_id"]
                 data["snapshot_id"] = snapshot.id  # 스냅샷 ID 추가
                 data["message"] = "POS 데이터 업로드 완료"
+                data["channel"] = channel
                 return Response(data, status=200)
             else:
                 return resp
@@ -563,10 +596,11 @@ class ProductVariantCSVUploadView(APIView):
         os.makedirs(folder, exist_ok=True)
         return os.path.join(folder, f"{batch_id}.json")
 
-    def _batch_start(self, filename: str):
+    def _batch_start(self, filename: str, channel: str | None = None):
         self._batch = {
             "batch_id": self._new_batch_id(),
             "filename": filename,
+            "channel": channel or "unknown",
             "snapshots": [],  # [{action, variant_code, before}]
         }
         self._batch_file = self._batch_path(self._batch["batch_id"])
@@ -781,6 +815,12 @@ class ProductVariantView(APIView):
                 "memo": openapi.Schema(
                     type=openapi.TYPE_STRING, description="메모", example="23FW 신상품"
                 ),
+                "channels": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description="판매 채널 태그",
+                    items=openapi.Items(type=openapi.TYPE_STRING),
+                    example=["online", "offline"],
+                ),
                 "suppliers": openapi.Schema(
                     type=openapi.TYPE_ARRAY,
                     description="공급자 매핑 목록",
@@ -811,6 +851,7 @@ class ProductVariantView(APIView):
                 "min_stock": 5,
                 "description": "튼튼한 크림슨 컬러 방패 필통",
                 "memo": "23FW 신상품",
+                "channels": ["online", "offline"],
                 "suppliers": [
                     {"name": "넥스트물류", "cost_price": 3016, "is_primary": True}
                 ],

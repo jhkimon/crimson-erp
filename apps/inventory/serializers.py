@@ -151,6 +151,11 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(
         source="product.category", read_only=True
     )  # read-only 출력용
+    channels = serializers.ListField(
+        child=serializers.ChoiceField(choices=["online", "offline"]),
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = ProductVariant
@@ -167,6 +172,7 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             "memo",
             "name",
             "suppliers",
+            "channels",
         ]
 
     def get_fields(self):
@@ -190,9 +196,14 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
 
         # suppliers 분리
         suppliers_data = validated_data.pop("suppliers", [])
+        channels = validated_data.pop("channels", None)
 
         # variant 생성
         variant = ProductVariant.objects.create(product=product, **validated_data)
+
+        if channels is not None:
+            variant.channels = channels
+            variant.save(update_fields=["channels"])
 
         # suppliers 연결
         for s in suppliers_data:
@@ -219,10 +230,20 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
 
         # 공급자 업데이트
         suppliers_data = validated_data.pop("suppliers", None)
+        channels = validated_data.pop("channels", None)
+
+        dirty_fields = []
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        instance.save()
+            dirty_fields.append(attr)
+
+        if channels is not None:
+            instance.channels = channels
+            dirty_fields.append("channels")
+
+        if dirty_fields:
+            instance.save(update_fields=list(dict.fromkeys(dirty_fields)))
 
         # Update SupplierVariants
         if suppliers_data is not None:
