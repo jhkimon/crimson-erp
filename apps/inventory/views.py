@@ -285,6 +285,16 @@ class ProductVariantCSVUploadView(APIView):
             return "sales_summary"
         else:
             return "unknown"
+        
+    def infer_channel_from_filename(self, filename: str) -> str | None:
+        """파일 이름에 'online', 'offline' 이 있는지 확인"""
+        lower_filename = filename.lower()
+        if "online" in lower_filename:
+            return "online"
+        if "offline" in lower_filename:
+            return "offline"
+            
+        return None
 
     @swagger_auto_schema(
         operation_summary="POS 데이터 업로드 (스냅샷 자동 생성)",
@@ -316,14 +326,6 @@ class ProductVariantCSVUploadView(APIView):
                 type=openapi.TYPE_FILE,
                 required=True,
                 description="업로드할 XLSX/XLS 파일",
-            ),
-            openapi.Parameter(
-                name="channel",
-                in_=openapi.IN_FORM,
-                type=openapi.TYPE_STRING,
-                enum=["online", "offline"],
-                required=True,
-                description="업로드 데이터의 채널 (online/offline)",
             ),
             openapi.Parameter(
                 name="reason",
@@ -393,18 +395,11 @@ class ProductVariantCSVUploadView(APIView):
     def post(self, request):
         excel_file = request.FILES.get("file")
         reason = request.data.get("reason", "POS 데이터 업로드")
-        channel_input = request.data.get("channel")
-
-        if channel_input is None:
-            return Response(
-                {"error": "channel 값은 필수입니다. (online/offline)"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        channel = str(channel_input).strip().lower()
+        filename = excel_file.name if excel_file else "unknown"
+        channel = self.infer_channel_from_filename(filename)
         if channel not in {"online", "offline"}:
             return Response(
-                {"error": "channel 값은 'online' 또는 'offline'이어야 합니다."},
+                {"error": "시트명에 'online' 또는 'offline'을 표시해주세요."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -449,9 +444,9 @@ class ProductVariantCSVUploadView(APIView):
 
         try:
             if sheet_type == "variant_detail":
-                resp = self.process_variant_detail(df)
+                resp = self.process_variant_detail(df, channel)
             elif sheet_type == "sales_summary":
-                resp = self.process_sales_summary(df)
+                resp = self.process_sales_summary(df, channel)
             else:
                 return Response(
                     {
@@ -477,7 +472,7 @@ class ProductVariantCSVUploadView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    def process_variant_detail(self, df):
+    def process_variant_detail(self, df, channel):
         required_cols = [
             "상품코드",
             "상품명",
@@ -491,7 +486,7 @@ class ProductVariantCSVUploadView(APIView):
         for col in required_cols:
             if col not in df.columns:
                 return Response(
-                    {"error": f"필수 컬럼이 누락되었습니다: {col}"},
+                    {"error": f"필수 컬럼 (상품코드, 상품명, 상품 품목코드, 옵션, 판매가, 재고, 판매수량, 환불수량) 이 누락되었습니다: {col}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -537,24 +532,21 @@ class ProductVariantCSVUploadView(APIView):
                             variant_code=variant_code
                         ).first()
 
-                    # ... 생략 ...
-
                     if variant:
                         self._snapshot_before("update", variant=variant)
                         variant.option = option
                         variant.price = price
-                        # 핵심 수정: 판매/환불을 반영해서 재고 보정
                         variant.stock += delta_stock - delta_order + delta_return
                         variant.order_count += delta_order
                         variant.return_count += delta_return
                         variant.save()
                         # 채널 태그: online 추가
                         if isinstance(variant.channels, list):
-                            if "online" not in variant.channels:
-                                variant.channels.append("online")
+                            if channel not in variant.channels:
+                                variant.channels.append(channel)
                                 variant.save(update_fields=["channels"])
                         else:
-                            variant.channels = ["online"]
+                            variant.channels = [channel]
                             variant.save(update_fields=["channels"])
                         updated.append(ProductVariantSerializer(variant).data)
                     else:
@@ -565,10 +557,10 @@ class ProductVariantCSVUploadView(APIView):
                             variant_code=variant_code,
                             option=option,
                             price=price,
-                            stock=(delta_stock - delta_order + delta_return),  # << 여기
+                            stock=(delta_stock - delta_order + delta_return),
                             order_count=delta_order,
                             return_count=delta_return,
-                            channels=["online"],
+                            channels=[channel],
                         )
                         created.append(ProductVariantSerializer(variant).data)
                 except Exception as e:
@@ -585,51 +577,8 @@ class ProductVariantCSVUploadView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-    # 배치로 업데이트 전 히스토리 저장
-    def _new_batch_id(self):
-        return timezone.now().strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
-
-    def _batch_path(self, batch_id: str):
-        base = getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
-        folder = os.path.join(base, "import_backups")
-        os.makedirs(folder, exist_ok=True)
-        return os.path.join(folder, f"{batch_id}.json")
-
-    def _batch_start(self, filename: str, channel: str | None = None):
-        self._batch = {
-            "batch_id": self._new_batch_id(),
-            "filename": filename,
-            "channel": channel or "unknown",
-            "snapshots": [],  # [{action, variant_code, before}]
-        }
-        self._batch_file = self._batch_path(self._batch["batch_id"])
-        return self._batch["batch_id"]
-
-    def _snapshot_before(
-        self, action: str, variant=None, variant_code: str | None = None
-    ):
-        """
-        action: 'create' | 'update'
-        - update: 현재 DB값을 before로 저장
-        - create: 생성될 코드만 기록 (before=None)
-        """
-        before = model_to_dict(variant) if variant is not None else None
-        code = variant.variant_code if variant is not None else variant_code
-        self._batch["snapshots"].append(
-            {
-                "action": action,
-                "variant_code": code,
-                "before": before,
-            }
-        )
-
-    def _batch_commit(self):
-        # 업로드 전체가 성공한 경우에만 파일 저장
-        with open(self._batch_file, "w", encoding="utf-8") as f:
-            json.dump(self._batch, f, ensure_ascii=False, indent=2)
-
-    def process_sales_summary(self, df):
+    
+    def process_sales_summary(self, df, channel):
 
         required_cols = [
             "바코드",
@@ -637,7 +586,7 @@ class ProductVariantCSVUploadView(APIView):
             "상품명",
             "판매가",
             "매출건수",
-        ]  # 변경: 오프라인 업로드에 매출 반영이 필수이므로 '매출건수'를 추가
+        ]
         for col in required_cols:
             if col not in df.columns:
                 return Response(
@@ -691,7 +640,7 @@ class ProductVariantCSVUploadView(APIView):
                         },
                     )
 
-                    if variant_created:
+                    if variant_created: # Create
                         self._snapshot_before(
                             "create", variant_code=variant.variant_code
                         )
@@ -701,32 +650,29 @@ class ProductVariantCSVUploadView(APIView):
                             order_count=F("order_count") + sales_count,
                             stock=F("stock") - sales_count,
                         )
-                        variant.refresh_from_db()  #
-                        # 채널 태그: offline 추가
+                        variant.refresh_from_db()
                         if isinstance(variant.channels, list):
-                            if "offline" not in variant.channels:
-                                variant.channels.append("offline")
+                            if channel not in variant.channels:
+                                variant.channels.append(channel)
                                 variant.save(update_fields=["channels"])
                         else:
-                            variant.channels = ["offline"]
+                            variant.channels = [channel]
                             variant.save(update_fields=["channels"])
                         created.append(ProductVariantSerializer(variant).data)
-                    else:
+                    else: # Update
                         self._snapshot_before("update", variant=variant)
-                        # 변경: 기존 variant에도 동일하게 결제수량 누적 + 재고 차감
                         ProductVariant.objects.filter(pk=variant.pk).update(
                             price=price,
                             order_count=F("order_count") + sales_count,
                             stock=F("stock") - sales_count,
                         )
                         variant.refresh_from_db()
-                        # 채널 태그: offline 추가
                         if isinstance(variant.channels, list):
-                            if "offline" not in variant.channels:
-                                variant.channels.append("offline")
+                            if channel not in variant.channels:
+                                variant.channels.append(channel)
                                 variant.save(update_fields=["channels"])
                         else:
-                            variant.channels = ["offline"]
+                            variant.channels = [channel]
                             variant.save(update_fields=["channels"])
                         updated.append(ProductVariantSerializer(variant).data)
 
@@ -744,6 +690,49 @@ class ProductVariantCSVUploadView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+    # 배치로 업데이트 전 히스토리 저장
+    def _new_batch_id(self):
+        return timezone.now().strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+
+    def _batch_path(self, batch_id: str):
+        base = getattr(settings, "MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
+        folder = os.path.join(base, "import_backups")
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, f"{batch_id}.json")
+
+    def _batch_start(self, filename: str, channel: str | None = None):
+        self._batch = {
+            "batch_id": self._new_batch_id(),
+            "filename": filename,
+            "channel": channel or "unknown",
+            "snapshots": [],  # [{action, variant_code, before}]
+        }
+        self._batch_file = self._batch_path(self._batch["batch_id"])
+        return self._batch["batch_id"]
+
+    def _snapshot_before(
+        self, action: str, variant=None, variant_code: str | None = None
+    ):
+        """
+        action: 'create' | 'update'
+        - update: 현재 DB값을 before로 저장
+        - create: 생성될 코드만 기록 (before=None)
+        """
+        before = model_to_dict(variant) if variant is not None else None
+        code = variant.variant_code if variant is not None else variant_code
+        self._batch["snapshots"].append(
+            {
+                "action": action,
+                "variant_code": code,
+                "before": before,
+            }
+        )
+
+    def _batch_commit(self):
+        # 업로드 전체가 성공한 경우에만 파일 저장
+        with open(self._batch_file, "w", encoding="utf-8") as f:
+            json.dump(self._batch, f, ensure_ascii=False, indent=2)
 
 
 # 상품 상세 정보 관련 View
