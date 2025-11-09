@@ -1,8 +1,8 @@
 from django.urls import path
-from apps.supplier.views import SupplierListCreateView, SupplierRetrieveUpdateView,  SupplierVariantUpdateView
+from apps.supplier.views import SupplierListCreateView, SupplierRetrieveUpdateView, SupplierOrderDetailView
 
 urlpatterns = [
     path('', SupplierListCreateView.as_view(), name='supplier-list-create'),
     path('<int:pk>/', SupplierRetrieveUpdateView.as_view(), name='supplier-detail'),
-    path('variants/<int:supplier_id>/<str:variant_code>/', SupplierVariantUpdateView.as_view(), name='supplier-variant-update')
+    path('<int:pk>/orders/', SupplierOrderDetailView.as_view(), name='supplier-orders'),
 ]

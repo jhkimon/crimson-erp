@@ -6,8 +6,6 @@ from .models import (
     InventorySnapshot,
     InventorySnapshotItem,
 )
-from apps.supplier.models import SupplierVariant
-
 
 class ProductOptionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -31,8 +29,6 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 
-    suppliers = serializers.SerializerMethodField()
-    cost_price = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     product_id = serializers.CharField(source="product.product_id", read_only=True)
     stock = serializers.IntegerField(read_only=True)
@@ -53,11 +49,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             'min_stock',             # 최소재고
             'description',          # 상품설명
             'memo',                  # 메모
-            'cost_price',           # 원가
             'order_count',          # 판매수량
             'return_count',          # 환불수량
             'sales',
-            'suppliers',            # 공급자명
             'channels',             # 온라인/오프라인 태그
         ]
 
@@ -75,28 +69,6 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         if product:
             validated_data["product"] = product
         return ProductVariant.objects.create(**validated_data)
-
-    def get_suppliers(self, obj):
-        variants = SupplierVariant.objects.select_related("supplier").filter(
-            variant=obj
-        )
-        return [
-            {
-                "name": sv.supplier.name,
-                "is_primary": sv.is_primary,
-                "cost_price": sv.cost_price,
-            }
-            for sv in variants
-        ]
-
-    def get_cost_price(self, obj):
-        supplier_variants = SupplierVariant.objects.filter(variant=obj)
-        prices = [
-            sv.cost_price for sv in supplier_variants if sv.cost_price is not None
-        ]
-        if not prices:
-            return None
-        return sum(prices) // len(prices)
 
     def get_sales(self, obj):
         return obj.price * (obj.order_count - obj.return_count)
@@ -125,25 +97,9 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
         ).data
 
 
-###### Create Update Delete를 위한 Serializer
-class SupplierVariantUpdateSerializer(serializers.Serializer):
-    name = serializers.CharField()
-    cost_price = serializers.IntegerField()
-    is_primary = serializers.BooleanField()
-
-    def validate_name(self, value):
-        from apps.supplier.models import Supplier
-
-        try:
-            return Supplier.objects.get(name=value)
-        except Supplier.DoesNotExist:
-            raise serializers.ValidationError(f"공급자 '{value}'는 존재하지 않습니다.")
-
-
 class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
     product_id = serializers.CharField(source="product.product_id", read_only=True)
     name = serializers.CharField(source="product.name", required=False)
-    suppliers = SupplierVariantUpdateSerializer(many=True, required=False)
     option = serializers.CharField(required=False)
     category = serializers.CharField(
         write_only=True, required=False
@@ -171,7 +127,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             "description",
             "memo",
             "name",
-            "suppliers",
             "channels",
         ]
 
@@ -194,8 +149,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             product.category = category_value
             product.save()
 
-        # suppliers 분리
-        suppliers_data = validated_data.pop("suppliers", [])
         channels = validated_data.pop("channels", None)
 
         # variant 생성
@@ -205,14 +158,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             variant.channels = channels
             variant.save(update_fields=["channels"])
 
-        # suppliers 연결
-        for s in suppliers_data:
-            SupplierVariant.objects.create(
-                variant=variant,
-                supplier=s["name"],
-                cost_price=s["cost_price"],
-                is_primary=s.get("is_primary", False),
-            )
         return variant
 
     def update(self, instance, validated_data):
@@ -228,8 +173,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             instance.product.category = category_value
             instance.product.save()
 
-        # 공급자 업데이트
-        suppliers_data = validated_data.pop("suppliers", None)
         channels = validated_data.pop("channels", None)
 
         dirty_fields = []
@@ -244,20 +187,6 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
 
         if dirty_fields:
             instance.save(update_fields=list(dict.fromkeys(dirty_fields)))
-
-        # Update SupplierVariants
-        if suppliers_data is not None:
-            # 기존 관계 제거
-            SupplierVariant.objects.filter(variant=instance).delete()
-
-            # 새로 추가
-            for s in suppliers_data:
-                SupplierVariant.objects.create(
-                    variant=instance,
-                    supplier=s["name"],
-                    cost_price=s["cost_price"],
-                    is_primary=s.get("is_primary", False),
-                )
         return instance
 
 
@@ -310,7 +239,6 @@ class InventorySnapshotItemSerializer(serializers.ModelSerializer):
             "option",
             "stock",
             "price",
-            "cost_price",
             "order_count",
             "return_count",
             "sales",

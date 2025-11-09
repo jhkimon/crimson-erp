@@ -1,7 +1,7 @@
 # apps/dashboard/urls.py
 from django.urls import path
-from .views import HRNotificationView
+from .views import DashboardNotificationView
 
 urlpatterns = [
-    path('notifications/', HRNotificationView.as_view(), name='hr-notifications'),
+    path('notifications/', DashboardNotificationView.as_view(), name='hr-notifications'),
 ]

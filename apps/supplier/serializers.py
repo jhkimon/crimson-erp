@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from apps.supplier.models import Supplier, SupplierVariant
-from apps.inventory.models import ProductVariant
+from apps.supplier.models import Supplier
+from apps.orders.models import Order, OrderItem
 
 
 # 빠른 검색용
@@ -9,70 +9,59 @@ class SupplierOptionSerializer(serializers.ModelSerializer):
         model = Supplier
         fields = ['id', 'name', 'contact', 'manager', 'email', 'address']
 
-# Supplier <> Variant Mapping Table 읽기용
-class SupplierVariantDetailSerializer(serializers.ModelSerializer):
-    variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
-    option = serializers.CharField(source='variant.option')
-    stock = serializers.IntegerField(source='variant.stock')
-    name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SupplierVariant
-        fields = ['variant_code', 'option', 'stock', 'name', 'cost_price', 'is_primary']
-
-    def get_name(self, obj):
-        return obj.variant.product.name
-    
-# Supplier <> Variant Mapping Table 수정용
-class SupplierVariantUpdateTableSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = SupplierVariant
-        fields = ['id', 'cost_price', 'is_primary']
-        read_only_fields = ['id']  # id는 변경하지 않고 참조만 할 수 있게 설정
-
 # Supplier 전체
 class SupplierSerializer(serializers.ModelSerializer):
-    # variant_codes는 입력용(write-only)
-    variant_codes = serializers.ListField(
-        child=serializers.CharField(), write_only=True, required=False
-    )
-    # variants는 출력용(read-only)
-    variants = serializers.SerializerMethodField()
-
     class Meta:
         model = Supplier
         fields = [
-            'id', 'name', 'contact', 'manager', 'email', 'address',
-            'variant_codes', 'variants'
+            'id', 'name', 'contact', 'manager', 'email', 'address'
         ]
 
-    def get_variants(self, obj):
-        supplier_variants = SupplierVariant.objects.filter(supplier=obj).select_related('variant__product')
-        return SupplierVariantDetailSerializer(supplier_variants, many=True).data
-
     def create(self, validated_data):
-        variant_codes = validated_data.pop('variant_codes', [])
         supplier = Supplier.objects.create(**validated_data)
 
-        # 연결된 variants 생성
-        variants = ProductVariant.objects.filter(variant_code__in=variant_codes)
-        for variant in variants:
-            SupplierVariant.objects.create(supplier=supplier, variant=variant)
 
         return supplier
 
     def update(self, instance, validated_data):
-        variant_codes = validated_data.pop('variant_codes', None)
-
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if variant_codes is not None:
-            # 기존 연결 제거 후 다시 추가
-            SupplierVariant.objects.filter(supplier=instance).delete()
-            variants = ProductVariant.objects.filter(variant_code__in=variant_codes)
-            for variant in variants:
-                SupplierVariant.objects.create(supplier=instance, variant=variant)
-
         return instance
+    
+class SupplierOrderItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.SerializerMethodField()
+    variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderItem
+        fields = ["variant_code", "item_name", "quantity", "unit_price", "total"]
+
+    def get_item_name(self, obj):
+        if obj.variant and obj.variant.product:
+            return obj.variant.product.name
+        return None
+
+    def get_total(self, obj):
+        return obj.quantity * obj.unit_price
+
+
+class SupplierOrderSerializer(serializers.ModelSerializer):
+    items = SupplierOrderItemSerializer(many=True, read_only=True)
+    total_price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_date",
+            "expected_delivery_date",
+            "status",
+            "total_price",
+            "items",
+        ]
+
+    def get_total_price(self, obj):
+        return sum(item.quantity * item.unit_price for item in obj.items.all())

@@ -50,7 +50,6 @@ from .serializers import (
     ProductPhysicalMergePreviewSerializer,
 )
 from apps.orders.models import OrderItem
-from apps.supplier.models import SupplierVariant
 from .filters import ProductVariantFilter, InventoryAdjustmentFilter
 
 
@@ -810,25 +809,6 @@ class ProductVariantView(APIView):
                     items=openapi.Items(type=openapi.TYPE_STRING),
                     example=["online", "offline"],
                 ),
-                "suppliers": openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    description="공급자 매핑 목록",
-                    items=openapi.Items(
-                        type=openapi.TYPE_OBJECT,
-                        required=["name", "cost_price", "is_primary"],
-                        properties={
-                            "name": openapi.Schema(
-                                type=openapi.TYPE_STRING, example="넥스트물류"
-                            ),
-                            "cost_price": openapi.Schema(
-                                type=openapi.TYPE_INTEGER, example=3016
-                            ),
-                            "is_primary": openapi.Schema(
-                                type=openapi.TYPE_BOOLEAN, example=True
-                            ),
-                        },
-                    ),
-                ),
             },
             example={
                 "product_id": "P00000YC",
@@ -841,9 +821,6 @@ class ProductVariantView(APIView):
                 "description": "튼튼한 크림슨 컬러 방패 필통",
                 "memo": "23FW 신상품",
                 "channels": ["online", "offline"],
-                "suppliers": [
-                    {"name": "넥스트물류", "cost_price": 3016, "is_primary": True}
-                ],
             },
         ),
         responses={201: ProductVariantSerializer, 400: "Bad Request"},
@@ -1033,23 +1010,6 @@ class ProductVariantDetailView(APIView):
                 "min_stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=4),
                 "description": openapi.Schema(type=openapi.TYPE_STRING, example=""),
                 "memo": openapi.Schema(type=openapi.TYPE_STRING, example=""),
-                "suppliers": openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Items(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            "name": openapi.Schema(
-                                type=openapi.TYPE_STRING, example="넥스트물류"
-                            ),
-                            "cost_price": openapi.Schema(
-                                type=openapi.TYPE_INTEGER, example=3016
-                            ),
-                            "is_primary": openapi.Schema(
-                                type=openapi.TYPE_BOOLEAN, example=True
-                            ),
-                        },
-                    ),
-                ),
             },
         ),
         responses={200: ProductVariantSerializer, 400: "Bad Request", 404: "Not Found"},
@@ -1244,9 +1204,6 @@ class InventoryItemMergeView(APIView):
             variant=target_variant
         )
         OrderItem.objects.filter(variant__in=source_variants).update(
-            variant=target_variant
-        )
-        SupplierVariant.objects.filter(variant__in=source_variants).update(
             variant=target_variant
         )
 

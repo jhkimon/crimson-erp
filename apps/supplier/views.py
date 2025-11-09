@@ -6,9 +6,9 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.shortcuts import get_object_or_404
 
-from apps.supplier.models import Supplier, SupplierVariant
-from apps.inventory.models import ProductVariant
-from apps.supplier.serializers import SupplierSerializer, SupplierOptionSerializer, SupplierVariantUpdateTableSerializer
+from apps.supplier.models import Supplier
+from apps.orders.models import Order
+from apps.supplier.serializers import SupplierSerializer, SupplierOptionSerializer, SupplierOrderSerializer
 
 class SupplierListCreateView(APIView):
     permission_classes = [AllowAny]
@@ -68,38 +68,27 @@ class SupplierRetrieveUpdateView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-class SupplierVariantUpdateView(APIView):
+class SupplierOrderDetailView(APIView):
+    """
+    특정 공급업체의 발주 세부내역 조회 (품목, 단가, 수량, 총액 등)
+    """
     permission_classes = [AllowAny]
-    
+
     @swagger_auto_schema(
-        operation_summary="공급업체-상품 옵션 매핑 수정",
-        manual_parameters=[
-            openapi.Parameter(
-                'supplier_id',
-                openapi.IN_PATH,
-                description="공급업체 ID (예: 1)",
-                type=openapi.TYPE_INTEGER
-            ),
-            openapi.Parameter(
-                'variant_code',
-                openapi.IN_PATH,
-                description="상품 상세 코드 (예: P00000XN000A)",
-                type=openapi.TYPE_STRING
-            ),
-        ],
-        request_body=SupplierVariantUpdateTableSerializer,
-        responses={200: SupplierVariantUpdateTableSerializer}
+        operation_summary="공급업체별 발주 내역 상세 조회",
+        operation_description="공급업체별로 발주(주문) 및 그 안의 품목, 가격, 수량 등의 세부 정보를 조회합니다.",
+        responses={200: SupplierOrderSerializer(many=True)}
     )
-    def patch(self, request, supplier_id, variant_code):
-        # 1. variant_code로 ProductVariant 객체 찾기
-        variant = get_object_or_404(ProductVariant, variant_code=variant_code)
+    def get(self, request, pk):
+        supplier = get_object_or_404(Supplier, pk=pk)
+        orders = (
+            Order.objects.filter(supplier=supplier)
+            .prefetch_related("items__variant__product")
+            .order_by("-order_date")
+        )
 
-        # 2. supplier_id와 variant를 기준으로 SupplierVariant 조회
-        sv = get_object_or_404(SupplierVariant, supplier_id=supplier_id, variant=variant)
-
-        # 3. 수정 로직
-        serializer = SupplierVariantUpdateTableSerializer(sv, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer = SupplierOrderSerializer(orders, many=True)
+        return Response({
+            "supplier": supplier.name,
+            "orders": serializer.data
+        }, status=status.HTTP_200_OK)
