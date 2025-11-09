@@ -7,6 +7,7 @@ from .models import (
     InventorySnapshotItem,
 )
 
+
 class ProductOptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
@@ -39,20 +40,20 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
         fields = [
-            'product_id',    # product_id
-            'name',             # 상품명
-            'category',         # 상품 카테고리
-            'variant_code',         # variant_code
-            'option',               # 옵션
-            'stock',                # 재고량
-            'price',                # 가격
-            'min_stock',             # 최소재고
-            'description',          # 상품설명
-            'memo',                  # 메모
-            'order_count',          # 판매수량
-            'return_count',          # 환불수량
-            'sales',
-            'channels',             # 온라인/오프라인 태그
+            "product_id",  # product_id
+            "name",  # 상품명
+            "category",  # 상품 카테고리
+            "variant_code",  # variant_code
+            "option",  # 옵션
+            "stock",  # 재고량
+            "price",  # 가격
+            "min_stock",  # 최소재고
+            "description",  # 상품설명
+            "memo",  # 메모
+            "order_count",  # 판매수량
+            "return_count",  # 환불수량
+            "sales",
+            "channels",  # 온라인/오프라인 태그
         ]
 
     def get_fields(self):
@@ -260,42 +261,42 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
         return getattr(obj.actor, "username", None)
 
 
-class ProductMatchSerializer(serializers.Serializer):
-    """매칭 결과를 보여주는 시리얼라이저"""
+# class ProductMatchSerializer(serializers.Serializer):
+#     """매칭 결과를 보여주는 시리얼라이저"""
 
-    offline_product_id = serializers.CharField()
-    offline_product_name = serializers.CharField()
-    online_variant_code = serializers.CharField()
-    online_product_name = serializers.CharField()
-    match_status = serializers.CharField()  # 'matched', 'no_match', 'already_matched'
-
-
-class ProductMatchingRequestSerializer(serializers.Serializer):
-    """매칭 요청용 시리얼라이저"""
-
-    auto_apply = serializers.BooleanField(
-        default=False, help_text="자동으로 매칭 결과를 적용할지 여부"
-    )
+#     offline_product_id = serializers.CharField()
+#     offline_product_name = serializers.CharField()
+#     online_variant_code = serializers.CharField()
+#     online_product_name = serializers.CharField()
+#     match_status = serializers.CharField()  # 'matched', 'no_match', 'already_matched'
 
 
-class ProductMatchingResponseSerializer(serializers.Serializer):
-    """매칭 응답용 시리얼라이저"""
+# class ProductMatchingRequestSerializer(serializers.Serializer):
+#     """매칭 요청용 시리얼라이저"""
 
-    total_offline_products = serializers.IntegerField()
-    total_online_products = serializers.IntegerField()
-    matched_count = serializers.IntegerField()
-    already_matched_count = serializers.IntegerField()
-    no_match_count = serializers.IntegerField()
-    matches = ProductMatchSerializer(many=True)
-    applied = serializers.BooleanField()  # auto_apply가 True일 때 실제 적용되었는지
+#     auto_apply = serializers.BooleanField(
+#         default=False, help_text="자동으로 매칭 결과를 적용할지 여부"
+#     )
 
 
-# 병합 전 미리보기용
-class ProductPhysicalMergePreviewSerializer(serializers.Serializer):
-    pass
+# class ProductMatchingResponseSerializer(serializers.Serializer):
+#     """매칭 응답용 시리얼라이저"""
+
+#     total_offline_products = serializers.IntegerField()
+#     total_online_products = serializers.IntegerField()
+#     matched_count = serializers.IntegerField()
+#     already_matched_count = serializers.IntegerField()
+#     no_match_count = serializers.IntegerField()
+#     matches = ProductMatchSerializer(many=True)
+#     applied = serializers.BooleanField()  # auto_apply가 True일 때 실제 적용되었는지
 
 
-# 병합 요청용
-class ProductPhysicalMergeRequestSerializer(serializers.Serializer):
-    management_code = serializers.CharField()
-    confirm = serializers.BooleanField(default=False)
+# # 병합 전 미리보기용
+# class ProductPhysicalMergePreviewSerializer(serializers.Serializer):
+#     pass
+
+
+# # 병합 요청용
+# class ProductPhysicalMergeRequestSerializer(serializers.Serializer):
+#     management_code = serializers.CharField()
+#     confirm = serializers.BooleanField(default=False)

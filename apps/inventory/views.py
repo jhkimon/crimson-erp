@@ -40,14 +40,8 @@ from .serializers import (
     ProductVariantSerializer,
     ProductVariantFullUpdateSerializer,
     InventoryItemWithVariantsSerializer,
-    ProductVariantCreateSerializer,
     InventoryAdjustmentSerializer,
     InventorySnapshotSerializer,
-    InventorySnapshotItemSerializer,
-    ProductMatchingRequestSerializer,
-    ProductMatchingResponseSerializer,
-    ProductPhysicalMergeRequestSerializer,
-    ProductPhysicalMergePreviewSerializer,
 )
 from apps.orders.models import OrderItem
 from .filters import ProductVariantFilter, InventoryAdjustmentFilter
@@ -284,7 +278,7 @@ class ProductVariantCSVUploadView(APIView):
             return "sales_summary"
         else:
             return "unknown"
-        
+
     def infer_channel_from_filename(self, filename: str) -> str | None:
         """파일 이름에 'online', 'offline' 이 있는지 확인"""
         lower_filename = filename.lower()
@@ -292,7 +286,7 @@ class ProductVariantCSVUploadView(APIView):
             return "online"
         if "offline" in lower_filename:
             return "offline"
-            
+
         return None
 
     @swagger_auto_schema(
@@ -485,7 +479,9 @@ class ProductVariantCSVUploadView(APIView):
         for col in required_cols:
             if col not in df.columns:
                 return Response(
-                    {"error": f"필수 컬럼 (상품코드, 상품명, 상품 품목코드, 옵션, 판매가, 재고, 판매수량, 환불수량) 이 누락되었습니다: {col}"},
+                    {
+                        "error": f"필수 컬럼 (상품코드, 상품명, 상품 품목코드, 옵션, 판매가, 재고, 판매수량, 환불수량) 이 누락되었습니다: {col}"
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -576,7 +572,7 @@ class ProductVariantCSVUploadView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-    
+
     def process_sales_summary(self, df, channel):
 
         required_cols = [
@@ -639,7 +635,7 @@ class ProductVariantCSVUploadView(APIView):
                         },
                     )
 
-                    if variant_created: # Create
+                    if variant_created:  # Create
                         self._snapshot_before(
                             "create", variant_code=variant.variant_code
                         )
@@ -658,7 +654,7 @@ class ProductVariantCSVUploadView(APIView):
                             variant.channels = [channel]
                             variant.save(update_fields=["channels"])
                         created.append(ProductVariantSerializer(variant).data)
-                    else: # Update
+                    else:  # Update
                         self._snapshot_before("update", variant=variant)
                         ProductVariant.objects.filter(pk=variant.pk).update(
                             price=price,
@@ -1625,557 +1621,558 @@ class InventorySnapshotRetrieveView(generics.RetrieveAPIView):
 
 
 ## 동일 상품 매칭
-class ProductMatchingView(APIView):
-    """
-    상품명 기반 온라인-오프라인 상품 매칭 API
-
-    GET  /products/match  : 매칭 가능한 상품 목록 미리보기
-    POST /products/match  : 상품명 기반 매칭 및 관리코드 부여
-    """
-
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_summary="상품명 기반 매칭 및 관리코드 부여",
-        operation_description="""
-        **온라인과 오프라인 상품을 상품명 기준으로 매칭합니다.**
-        
-        **처리 과정:**
-        1. management_code가 비어있는 오프라인 상품들을 조회
-        2. 온라인 상품들과 상품명으로 완전 일치 검색
-        3. 매칭 결과를 반환 (auto_apply=true시 자동으로 관리코드 부여)
-        
-        **매칭 상태:**
-        - **matched**: 새로 매칭된 상품
-        - **already_matched**: 이미 관리코드가 부여된 상품
-        - **no_match**: 매칭되는 온라인 상품이 없음
-        """,
-        tags=["inventory - Product Matching"],
-        request_body=ProductMatchingRequestSerializer,
-        responses={200: ProductMatchingResponseSerializer, 400: "Bad Request"},
-    )
-    def post(self, request):
-        serializer = ProductMatchingRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        auto_apply = serializer.validated_data.get("auto_apply", False)
-
-        # 1. 오프라인 상품들 (management_code가 비어있는 것들)
-        offline_products = InventoryItem.objects.filter(
-            models.Q(management_code__isnull=True) | models.Q(management_code="")
-        ).values("product_id", "name")
-
-        # 2. 온라인 상품들 (ProductVariant를 통해 조회)
-        online_products = ProductVariant.objects.select_related("product").values(
-            "variant_code", "product__name"
-        )
-
-        # 3. 이미 매칭된 오프라인 상품들
-        already_matched = InventoryItem.objects.exclude(
-            models.Q(management_code__isnull=True) | models.Q(management_code="")
-        ).values("product_id", "name", "management_code")
-
-        # 4. 매칭 로직 수행
-        matches = []
-        matched_count = 0
-        applied_matches = []
-
-        # 온라인 상품명을 키로 하는 딕셔너리 생성
-        online_dict = {
-            product["product__name"]: product["variant_code"]
-            for product in online_products
-        }
-
-        # 오프라인 상품들과 매칭 시도
-        for offline_product in offline_products:
-            offline_name = offline_product["name"]
-            offline_id = offline_product["product_id"]
-
-            if offline_name in online_dict:
-                # 매칭 성공
-                online_variant_code = online_dict[offline_name]
-                matches.append(
-                    {
-                        "offline_product_id": offline_id,
-                        "offline_product_name": offline_name,
-                        "online_variant_code": online_variant_code,
-                        "online_product_name": offline_name,  # 같은 이름이므로
-                        "match_status": "matched",
-                    }
-                )
-                matched_count += 1
-
-                # auto_apply가 True면 실제로 관리코드 부여
-                if auto_apply:
-                    applied_matches.append(
-                        {
-                            "product_id": offline_id,
-                            "management_code": online_variant_code,
-                        }
-                    )
-            else:
-                # 매칭 실패
-                matches.append(
-                    {
-                        "offline_product_id": offline_id,
-                        "offline_product_name": offline_name,
-                        "online_variant_code": None,
-                        "online_product_name": None,
-                        "match_status": "no_match",
-                    }
-                )
-
-        # 이미 매칭된 상품들도 결과에 포함
-        for matched_product in already_matched:
-            matches.append(
-                {
-                    "offline_product_id": matched_product["product_id"],
-                    "offline_product_name": matched_product["name"],
-                    "online_variant_code": matched_product["management_code"],
-                    "online_product_name": matched_product["name"],
-                    "match_status": "already_matched",
-                }
-            )
-
-        # 5. auto_apply가 True인 경우 실제 DB 업데이트
-        applied = False
-        if auto_apply and applied_matches:
-            with transaction.atomic():
-                for match in applied_matches:
-                    InventoryItem.objects.filter(product_id=match["product_id"]).update(
-                        management_code=match["management_code"]
-                    )
-                applied = True
-
-        # 6. 응답 데이터 구성
-        response_data = {
-            "total_offline_products": len(offline_products),
-            "total_online_products": len(online_products),
-            "matched_count": matched_count,
-            "already_matched_count": len(already_matched),
-            "no_match_count": len(offline_products) - matched_count,
-            "matches": matches,
-            "applied": applied,
-        }
-
-        return Response(response_data, status=status.HTTP_200_OK)
-
-    @swagger_auto_schema(
-        operation_summary="매칭 가능한 상품 목록 미리보기",
-        operation_description="실제 매칭을 수행하지 않고 매칭 가능한 상품들을 미리 확인합니다.",
-        tags=["inventory - Product Matching"],
-        responses={200: ProductMatchingResponseSerializer},
-    )
-    def get(self, request):
-        # POST와 동일한 로직이지만 auto_apply=False로 고정
-        return self.post(request._clone_with_data({"auto_apply": False}))
-
-
-class ProductMergeView(APIView):
-    """
-    같은 관리코드를 가진 온라인-오프라인 상품 통합 조회/관리
-
-    GET /products/merge/{management_code}/  : 관리코드 기준 통합 상품 조회
-    """
-
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_summary="관리코드 기준 통합 상품 조회",
-        operation_description="""
-        **같은 관리코드(품목코드)를 가진 온라인-오프라인 상품을 통합해서 조회합니다.**
-        
-        **통합 정보:**
-        - 총 재고량 (온라인 + 오프라인)
-        - 총 판매량 (온라인 + 오프라인)
-        - 가격 정보
-        - 상품 기본 정보
-        """,
-        tags=["inventory - Product Merge"],
-        manual_parameters=[
-            openapi.Parameter(
-                "management_code",
-                openapi.IN_PATH,
-                description="통합 조회할 관리코드 (품목코드)",
-                type=openapi.TYPE_STRING,
-            )
-        ],
-        responses={200: "통합 상품 정보", 404: "Not Found"},
-    )
-    def get(self, request, management_code):
-        # 1. 오프라인 상품 조회
-        try:
-            offline_product = InventoryItem.objects.get(management_code=management_code)
-        except InventoryItem.DoesNotExist:
-            offline_product = None
-
-        # 2. 온라인 상품 조회
-        try:
-            online_variant = ProductVariant.objects.select_related("product").get(
-                variant_code=management_code
-            )
-        except ProductVariant.DoesNotExist:
-            online_variant = None
-
-        if not offline_product and not online_variant:
-            return Response(
-                {"error": "해당 관리코드의 상품이 존재하지 않습니다."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # 3. 통합 정보 구성
-        merged_data = {
-            "management_code": management_code,
-            "product_name": (
-                offline_product.name if offline_product else online_variant.product.name
-            ),
-            "category": (
-                offline_product.category
-                if offline_product
-                else online_variant.product.category
-            ),
-            "offline_data": None,
-            "online_data": None,
-            "merged_summary": {
-                "total_stock": 0,
-                "total_sales": 0,
-                "total_order_count": 0,
-                "total_return_count": 0,
-            },
-        }
-
-        if offline_product:
-            # 오프라인은 기본 variant 조회
-            offline_variant = ProductVariant.objects.filter(
-                product=offline_product
-            ).first()
-
-            merged_data["offline_data"] = {
-                "product_id": offline_product.product_id,
-                "stock": offline_variant.stock if offline_variant else 0,
-                "price": offline_variant.price if offline_variant else 0,
-                "order_count": offline_variant.order_count if offline_variant else 0,
-                "return_count": offline_variant.return_count if offline_variant else 0,
-            }
-
-            if offline_variant:
-                merged_data["merged_summary"]["total_stock"] += offline_variant.stock
-                merged_data["merged_summary"][
-                    "total_order_count"
-                ] += offline_variant.order_count
-                merged_data["merged_summary"][
-                    "total_return_count"
-                ] += offline_variant.return_count
-
-        if online_variant:
-            merged_data["online_data"] = {
-                "variant_code": online_variant.variant_code,
-                "option": online_variant.option,
-                "stock": online_variant.stock,
-                "price": online_variant.price,
-                "order_count": online_variant.order_count,
-                "return_count": online_variant.return_count,
-            }
-
-            merged_data["merged_summary"]["total_stock"] += online_variant.stock
-            merged_data["merged_summary"][
-                "total_order_count"
-            ] += online_variant.order_count
-            merged_data["merged_summary"][
-                "total_return_count"
-            ] += online_variant.return_count
-
-        # 총 매출 계산
-        net_sales = (
-            merged_data["merged_summary"]["total_order_count"]
-            - merged_data["merged_summary"]["total_return_count"]
-        )
-        if online_variant:
-            merged_data["merged_summary"]["total_sales"] = (
-                online_variant.price * net_sales
-            )
-        elif offline_product:
-            offline_variant = ProductVariant.objects.filter(
-                product=offline_product
-            ).first()
-            if offline_variant:
-                merged_data["merged_summary"]["total_sales"] = (
-                    offline_variant.price * net_sales
-                )
-
-        return Response(merged_data, status=status.HTTP_200_OK)
-
-
-class MergeableProductsListView(generics.ListAPIView):
-    """
-    GET /mergeable-products : 병합 가능한 상품 목록 조회
-    (management_code가 있고 variant_code와 매칭되는 상품들)
-    """
-
-    def get_queryset(self):
-        # management_code가 있는 InventoryItem들
-        return InventoryItem.objects.filter(management_code__isnull=False).exclude(
-            management_code=""
-        )
-
-    def list(self, request, *args, **kwargs):
-        try:
-            offline_items = self.get_queryset()
-            mergeable_products = []
-
-            for item in offline_items:
-                try:
-                    # 해당 management_code와 같은 variant_code를 가진 온라인 상품이 있는지 확인
-                    online_variant = ProductVariant.objects.get(
-                        variant_code=item.management_code
-                    )
-
-                    # 오프라인 ProductVariant 확인
-                    offline_variant = ProductVariant.objects.get(
-                        product__inventoryitem=item
-                    )
-
-                    mergeable_products.append(
-                        {
-                            "management_code": item.management_code,
-                            "offline_product_name": item.name,
-                            "online_product_name": online_variant.product.name,
-                            "offline_stock": offline_variant.stock or 0,
-                            "online_stock": online_variant.stock or 0,
-                            "total_stock_after_merge": (offline_variant.stock or 0)
-                            + (online_variant.stock or 0),
-                        }
-                    )
-
-                except ProductVariant.DoesNotExist:
-                    # 매칭되는 온라인 상품이 없거나 오프라인 기본 옵션이 없는 경우 스킵
-                    continue
-
-            return Response(
-                {
-                    "success": True,
-                    "mergeable_products": mergeable_products,
-                    "total_count": len(mergeable_products),
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        except Exception as e:
-            return Response(
-                {"error": f"병합 가능한 상품 조회 중 오류가 발생했습니다: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-
-class ProductMergeCreateView(generics.CreateAPIView):
-    """
-    POST /merge/product : 오프라인과 온라인 상품을 하나로 병합
-
-    Request Body:
-    {
-        "management_code": "1234"  # 병합할 상품들의 공통 코드
-    }
-    """
-
-    serializer_class = ProductPhysicalMergeRequestSerializer
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        management_code = serializer.validated_data["management_code"]
-        confirm = serializer.validated_data.get("confirm", False)
-
-        # 확인하지 않은 경우 에러 반환
-        if not confirm:
-            return Response(
-                {"error": "병합을 진행하려면 confirm을 true로 설정해주세요."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            with transaction.atomic():
-                # 1. management_code로 오프라인 InventoryItem 찾기
-                offline_item = get_object_or_404(
-                    InventoryItem, management_code=management_code
-                )
-
-                # 2. variant_code로 온라인 ProductVariant 찾기
-                online_variant = get_object_or_404(
-                    ProductVariant, variant_code=management_code
-                )
-
-                # 3. 오프라인 ProductVariant 찾기 (option="기본")
-                offline_variant = get_object_or_404(
-                    ProductVariant, product__inventoryitem=offline_item
-                )
-
-                # 4. 데이터 병합 (오프라인 → 온라인)
-                # 재고 수량 합산
-                online_variant.stock = (online_variant.stock or 0) + (
-                    offline_variant.stock or 0
-                )
-
-                # 판매 수량 합산
-                online_variant.order_count = (online_variant.order_count or 0) + (
-                    offline_variant.order_count or 0
-                )
-                online_variant.return_count = (online_variant.return_count or 0) + (
-                    offline_variant.return_count or 0
-                )
-
-                # 가격 정보 (오프라인이 있으면 우선 적용, 없으면 온라인 유지)
-                if offline_variant.price:
-                    online_variant.price = offline_variant.price
-                if offline_variant.cost_price:
-                    online_variant.cost_price = offline_variant.cost_price
-
-                # 5. 온라인 Product명을 오프라인 InventoryItem명으로 변경
-                online_product = online_variant.product
-                original_online_name = online_product.name
-                online_product.name = offline_item.name
-                online_product.save()
-
-                # 6. 온라인 ProductVariant 저장
-                online_variant.save()
-
-                # 7. 오프라인 데이터 삭제/비활성화
-                offline_product = offline_variant.product
-                offline_item_name = offline_item.name
-
-                # ProductVariant 먼저 삭제
-                offline_variant.delete()
-
-                # InventoryItem 삭제
-                offline_item.delete()
-
-                # Product가 더 이상 연결된 variant가 없으면 삭제
-                if not offline_product.variants.exists():
-                    offline_product.delete()
-
-                return Response(
-                    {
-                        "success": True,
-                        "message": f'상품 "{offline_item_name}"이 성공적으로 병합되었습니다.',
-                        "merged_product": {
-                            "variant_code": online_variant.variant_code,
-                            "product_name": online_product.name,
-                            "stock": online_variant.stock,  # ← 수정
-                            "order_count": online_variant.order_count,  # ← 추가(선택)
-                            "return_count": online_variant.return_count,  # ← 추가(선택)
-                            "price": (
-                                str(online_variant.price)
-                                if online_variant.price
-                                else None
-                            ),
-                        },
-                    },
-                    status=status.HTTP_201_CREATED,
-                )
-
-        except InventoryItem.DoesNotExist:
-            return Response(
-                {
-                    "error": f'관리코드 "{management_code}"에 해당하는 오프라인 상품을 찾을 수 없습니다.'
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        except ProductVariant.DoesNotExist:
-            return Response(
-                {
-                    "error": f'품목코드 "{management_code}"에 해당하는 온라인 상품을 찾을 수 없거나, 오프라인 상품의 기본 옵션을 찾을 수 없습니다.'
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        except Exception as e:
-            return Response(
-                {"error": f"병합 중 오류가 발생했습니다: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-
-class BatchProductMergeView(APIView):
-    """
-    POST /batch/merge/products : 여러 상품을 한번에 병합
-
-    Request Body:
-    {
-        "management_codes": ["1234", "5678", "9999"]
-    }
-    """
-
-    def post(self, request, *args, **kwargs):
-        management_codes = request.data.get("management_codes", [])
-
-        if not management_codes:
-            return Response(
-                {"error": "병합할 관리코드 목록이 필요합니다."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        results = {"success": [], "failed": []}
-
-        for code in management_codes:
-            try:
-                with transaction.atomic():
-                    # 단일 병합 로직과 동일
-                    offline_item = InventoryItem.objects.get(management_code=code)
-                    online_variant = ProductVariant.objects.get(variant_code=code)
-                    offline_variant = ProductVariant.objects.get(
-                        product__inventoryitem=offline_item
-                    )
-
-                    # 데이터 병합
-                    online_variant.stock = (online_variant.stock or 0) + (
-                        offline_variant.stock or 0
-                    )
-                    online_variant.order_count = (online_variant.order_count or 0) + (
-                        offline_variant.order_count or 0
-                    )
-                    online_variant.return_count = (online_variant.return_count or 0) + (
-                        offline_variant.return_count or 0
-                    )
-
-                    if offline_variant.price:
-                        online_variant.price = offline_variant.price
-                    if offline_variant.cost_price:
-                        online_variant.cost_price = offline_variant.cost_price
-
-                    # 상품명 변경
-                    online_product = online_variant.product
-                    offline_item_name = offline_item.name
-                    online_product.name = offline_item_name
-                    online_product.save()
-                    online_variant.save()
-
-                    # 오프라인 데이터 정리
-                    offline_product = offline_variant.product
-                    offline_variant.delete()
-                    offline_item.delete()
-
-                    if not offline_product.variants.exists():
-                        offline_product.delete()
-
-                    results["success"].append(
-                        {
-                            "management_code": code,
-                            "product_name": offline_item_name,
-                            "message": "병합 완료",
-                        }
-                    )
-
-            except Exception as e:
-                results["failed"].append({"management_code": code, "error": str(e)})
-
-        return Response(
-            {
-                "results": results,
-                "total_success": len(results["success"]),
-                "total_failed": len(results["failed"]),
-            },
-            status=status.HTTP_200_OK,
-        )
+# class ProductMatchingView(APIView):
+#     """
+#     상품명 기반 온라인-오프라인 상품 매칭 API
+
+#     GET  /products/match  : 매칭 가능한 상품 목록 미리보기
+#     POST /products/match  : 상품명 기반 매칭 및 관리코드 부여
+#     """
+
+#     permission_classes = [AllowAny]
+
+#     @swagger_auto_schema(
+#         operation_summary="상품명 기반 매칭 및 관리코드 부여",
+#         operation_description="""
+#         **온라인과 오프라인 상품을 상품명 기준으로 매칭합니다.**
+
+#         **처리 과정:**
+#         1. management_code가 비어있는 오프라인 상품들을 조회
+#         2. 온라인 상품들과 상품명으로 완전 일치 검색
+#         3. 매칭 결과를 반환 (auto_apply=true시 자동으로 관리코드 부여)
+
+#         **매칭 상태:**
+#         - **matched**: 새로 매칭된 상품
+#         - **already_matched**: 이미 관리코드가 부여된 상품
+#         - **no_match**: 매칭되는 온라인 상품이 없음
+#         """,
+#         tags=["inventory - Product Matching"],
+#         request_body=ProductMatchingRequestSerializer,
+#         responses={200: ProductMatchingResponseSerializer, 400: "Bad Request"},
+#     )
+#     def post(self, request):
+#         serializer = ProductMatchingRequestSerializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#         auto_apply = serializer.validated_data.get("auto_apply", False)
+
+#         # 1. 오프라인 상품들 (management_code가 비어있는 것들)
+#         offline_products = InventoryItem.objects.filter(
+#             models.Q(management_code__isnull=True) | models.Q(management_code="")
+#         ).values("product_id", "name")
+
+#         # 2. 온라인 상품들 (ProductVariant를 통해 조회)
+#         online_products = ProductVariant.objects.select_related("product").values(
+#             "variant_code", "product__name"
+#         )
+
+#         # 3. 이미 매칭된 오프라인 상품들
+#         already_matched = InventoryItem.objects.exclude(
+#             models.Q(management_code__isnull=True) | models.Q(management_code="")
+#         ).values("product_id", "name", "management_code")
+
+#         # 4. 매칭 로직 수행
+#         matches = []
+#         matched_count = 0
+#         applied_matches = []
+
+#         # 온라인 상품명을 키로 하는 딕셔너리 생성
+#         online_dict = {
+#             product["product__name"]: product["variant_code"]
+#             for product in online_products
+#         }
+
+#         # 오프라인 상품들과 매칭 시도
+#         for offline_product in offline_products:
+#             offline_name = offline_product["name"]
+#             offline_id = offline_product["product_id"]
+
+#             if offline_name in online_dict:
+#                 # 매칭 성공
+#                 online_variant_code = online_dict[offline_name]
+#                 matches.append(
+#                     {
+#                         "offline_product_id": offline_id,
+#                         "offline_product_name": offline_name,
+#                         "online_variant_code": online_variant_code,
+#                         "online_product_name": offline_name,  # 같은 이름이므로
+#                         "match_status": "matched",
+#                     }
+#                 )
+#                 matched_count += 1
+
+#                 # auto_apply가 True면 실제로 관리코드 부여
+#                 if auto_apply:
+#                     applied_matches.append(
+#                         {
+#                             "product_id": offline_id,
+#                             "management_code": online_variant_code,
+#                         }
+#                     )
+#             else:
+#                 # 매칭 실패
+#                 matches.append(
+#                     {
+#                         "offline_product_id": offline_id,
+#                         "offline_product_name": offline_name,
+#                         "online_variant_code": None,
+#                         "online_product_name": None,
+#                         "match_status": "no_match",
+#                     }
+#                 )
+
+#         # 이미 매칭된 상품들도 결과에 포함
+#         for matched_product in already_matched:
+#             matches.append(
+#                 {
+#                     "offline_product_id": matched_product["product_id"],
+#                     "offline_product_name": matched_product["name"],
+#                     "online_variant_code": matched_product["management_code"],
+#                     "online_product_name": matched_product["name"],
+#                     "match_status": "already_matched",
+#                 }
+#             )
+
+#         # 5. auto_apply가 True인 경우 실제 DB 업데이트
+#         applied = False
+#         if auto_apply and applied_matches:
+#             with transaction.atomic():
+#                 for match in applied_matches:
+#                     InventoryItem.objects.filter(product_id=match["product_id"]).update(
+#                         management_code=match["management_code"]
+#                     )
+#                 applied = True
+
+#         # 6. 응답 데이터 구성
+#         response_data = {
+#             "total_offline_products": len(offline_products),
+#             "total_online_products": len(online_products),
+#             "matched_count": matched_count,
+#             "already_matched_count": len(already_matched),
+#             "no_match_count": len(offline_products) - matched_count,
+#             "matches": matches,
+#             "applied": applied,
+#         }
+
+#         return Response(response_data, status=status.HTTP_200_OK)
+
+#     @swagger_auto_schema(
+#         operation_summary="매칭 가능한 상품 목록 미리보기",
+#         operation_description="실제 매칭을 수행하지 않고 매칭 가능한 상품들을 미리 확인합니다.",
+#         tags=["inventory - Product Matching"],
+#         responses={200: ProductMatchingResponseSerializer},
+#     )
+#     def get(self, request):
+#         # POST와 동일한 로직이지만 auto_apply=False로 고정
+#         return self.post(request._clone_with_data({"auto_apply": False}))
+
+
+# class ProductMergeView(APIView):
+#     """
+#     같은 관리코드를 가진 온라인-오프라인 상품 통합 조회/관리
+
+#     GET /products/merge/{management_code}/  : 관리코드 기준 통합 상품 조회
+#     """
+
+#     permission_classes = [AllowAny]
+
+#     @swagger_auto_schema(
+#         operation_summary="관리코드 기준 통합 상품 조회",
+#         operation_description="""
+#         **같은 관리코드(품목코드)를 가진 온라인-오프라인 상품을 통합해서 조회합니다.**
+
+#         **통합 정보:**
+#         - 총 재고량 (온라인 + 오프라인)
+#         - 총 판매량 (온라인 + 오프라인)
+#         - 가격 정보
+#         - 상품 기본 정보
+#         """,
+#         tags=["inventory - Product Merge"],
+#         manual_parameters=[
+#             openapi.Parameter(
+#                 "management_code",
+#                 openapi.IN_PATH,
+#                 description="통합 조회할 관리코드 (품목코드)",
+#                 type=openapi.TYPE_STRING,
+#             )
+#         ],
+#         responses={200: "통합 상품 정보", 404: "Not Found"},
+#     )
+#     def get(self, request, management_code):
+#         # 1. 오프라인 상품 조회
+#         try:
+#             offline_product = InventoryItem.objects.get(management_code=management_code)
+#         except InventoryItem.DoesNotExist:
+#             offline_product = None
+
+#         # 2. 온라인 상품 조회
+#         try:
+#             online_variant = ProductVariant.objects.select_related("product").get(
+#                 variant_code=management_code
+#             )
+#         except ProductVariant.DoesNotExist:
+#             online_variant = None
+
+#         if not offline_product and not online_variant:
+#             return Response(
+#                 {"error": "해당 관리코드의 상품이 존재하지 않습니다."},
+#                 status=status.HTTP_404_NOT_FOUND,
+#             )
+
+#         # 3. 통합 정보 구성
+#         merged_data = {
+#             "management_code": management_code,
+#             "product_name": (
+#                 offline_product.name if offline_product else online_variant.product.name
+#             ),
+#             "category": (
+#                 offline_product.category
+#                 if offline_product
+#                 else online_variant.product.category
+#             ),
+#             "offline_data": None,
+#             "online_data": None,
+#             "merged_summary": {
+#                 "total_stock": 0,
+#                 "total_sales": 0,
+#                 "total_order_count": 0,
+#                 "total_return_count": 0,
+#             },
+#         }
+
+#         if offline_product:
+#             # 오프라인은 기본 variant 조회
+#             offline_variant = ProductVariant.objects.filter(
+#                 product=offline_product
+#             ).first()
+
+#             merged_data["offline_data"] = {
+#                 "product_id": offline_product.product_id,
+#                 "stock": offline_variant.stock if offline_variant else 0,
+#                 "price": offline_variant.price if offline_variant else 0,
+#                 "order_count": offline_variant.order_count if offline_variant else 0,
+#                 "return_count": offline_variant.return_count if offline_variant else 0,
+#             }
+
+#             if offline_variant:
+#                 merged_data["merged_summary"]["total_stock"] += offline_variant.stock
+#                 merged_data["merged_summary"][
+#                     "total_order_count"
+#                 ] += offline_variant.order_count
+#                 merged_data["merged_summary"][
+#                     "total_return_count"
+#                 ] += offline_variant.return_count
+
+#         if online_variant:
+#             merged_data["online_data"] = {
+#                 "variant_code": online_variant.variant_code,
+#                 "option": online_variant.option,
+#                 "stock": online_variant.stock,
+#                 "price": online_variant.price,
+#                 "order_count": online_variant.order_count,
+#                 "return_count": online_variant.return_count,
+#             }
+
+#             merged_data["merged_summary"]["total_stock"] += online_variant.stock
+#             merged_data["merged_summary"][
+#                 "total_order_count"
+#             ] += online_variant.order_count
+#             merged_data["merged_summary"][
+#                 "total_return_count"
+#             ] += online_variant.return_count
+
+#         # 총 매출 계산
+#         net_sales = (
+#             merged_data["merged_summary"]["total_order_count"]
+#             - merged_data["merged_summary"]["total_return_count"]
+#         )
+#         if online_variant:
+#             merged_data["merged_summary"]["total_sales"] = (
+#                 online_variant.price * net_sales
+#             )
+#         elif offline_product:
+#             offline_variant = ProductVariant.objects.filter(
+#                 product=offline_product
+#             ).first()
+#             if offline_variant:
+#                 merged_data["merged_summary"]["total_sales"] = (
+#                     offline_variant.price * net_sales
+#                 )
+
+#         return Response(merged_data, status=status.HTTP_200_OK)
+
+
+# class MergeableProductsListView(generics.ListAPIView):
+#     """
+#     GET /mergeable-products : 병합 가능한 상품 목록 조회
+#     (management_code가 있고 variant_code와 매칭되는 상품들)
+#     """
+
+#     def get_queryset(self):
+#         # management_code가 있는 InventoryItem들
+#         return InventoryItem.objects.filter(management_code__isnull=False).exclude(
+#             management_code=""
+#         )
+
+#     def list(self, request, *args, **kwargs):
+#         try:
+#             offline_items = self.get_queryset()
+#             mergeable_products = []
+
+#             for item in offline_items:
+#                 try:
+#                     # 해당 management_code와 같은 variant_code를 가진 온라인 상품이 있는지 확인
+#                     online_variant = ProductVariant.objects.get(
+#                         variant_code=item.management_code
+#                     )
+
+#                     # 오프라인 ProductVariant 확인
+#                     offline_variant = ProductVariant.objects.get(
+#                         product__inventoryitem=item
+#                     )
+
+#                     mergeable_products.append(
+#                         {
+#                             "management_code": item.management_code,
+#                             "offline_product_name": item.name,
+#                             "online_product_name": online_variant.product.name,
+#                             "offline_stock": offline_variant.stock or 0,
+#                             "online_stock": online_variant.stock or 0,
+#                             "total_stock_after_merge": (offline_variant.stock or 0)
+#                             + (online_variant.stock or 0),
+#                         }
+#                     )
+
+#                 except ProductVariant.DoesNotExist:
+#                     # 매칭되는 온라인 상품이 없거나 오프라인 기본 옵션이 없는 경우 스킵
+#                     continue
+
+#             return Response(
+#                 {
+#                     "success": True,
+#                     "mergeable_products": mergeable_products,
+#                     "total_count": len(mergeable_products),
+#                 },
+#                 status=status.HTTP_200_OK,
+#             )
+
+#         except Exception as e:
+#             return Response(
+#                 {"error": f"병합 가능한 상품 조회 중 오류가 발생했습니다: {str(e)}"},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             )
+
+
+# class ProductMergeCreateView(generics.CreateAPIView):
+#     """
+#     POST /merge/product : 오프라인과 온라인 상품을 하나로 병합
+
+#     Request Body:
+#     {
+#         "management_code": "1234"  # 병합할 상품들의 공통 코드
+#     }
+#     """
+
+#     serializer_class = ProductPhysicalMergeRequestSerializer
+
+#     def create(self, request, *args, **kwargs):
+#         serializer = self.get_serializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#         management_code = serializer.validated_data["management_code"]
+#         confirm = serializer.validated_data.get("confirm", False)
+
+#         # 확인하지 않은 경우 에러 반환
+#         if not confirm:
+#             return Response(
+#                 {"error": "병합을 진행하려면 confirm을 true로 설정해주세요."},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+
+#         try:
+#             with transaction.atomic():
+#                 # 1. management_code로 오프라인 InventoryItem 찾기
+#                 offline_item = get_object_or_404(
+#                     InventoryItem, management_code=management_code
+#                 )
+
+#                 # 2. variant_code로 온라인 ProductVariant 찾기
+#                 online_variant = get_object_or_404(
+#                     ProductVariant, variant_code=management_code
+#                 )
+
+#                 # 3. 오프라인 ProductVariant 찾기 (option="기본")
+#                 offline_variant = get_object_or_404(
+#                     ProductVariant, product__inventoryitem=offline_item
+#                 )
+
+#                 # 4. 데이터 병합 (오프라인 → 온라인)
+#                 # 재고 수량 합산
+#                 online_variant.stock = (online_variant.stock or 0) + (
+#                     offline_variant.stock or 0
+#                 )
+
+#                 # 판매 수량 합산
+#                 online_variant.order_count = (online_variant.order_count or 0) + (
+#                     offline_variant.order_count or 0
+#                 )
+#                 online_variant.return_count = (online_variant.return_count or 0) + (
+#                     offline_variant.return_count or 0
+#                 )
+
+#                 # 가격 정보 (오프라인이 있으면 우선 적용, 없으면 온라인 유지)
+#                 if offline_variant.price:
+#                     online_variant.price = offline_variant.price
+#                 if offline_variant.cost_price:
+#                     online_variant.cost_price = offline_variant.cost_price
+
+#                 # 5. 온라인 Product명을 오프라인 InventoryItem명으로 변경
+#                 online_product = online_variant.product
+#                 original_online_name = online_product.name
+#                 online_product.name = offline_item.name
+#                 online_product.save()
+
+#                 # 6. 온라인 ProductVariant 저장
+#                 online_variant.save()
+
+#                 # 7. 오프라인 데이터 삭제/비활성화
+#                 offline_product = offline_variant.product
+#                 offline_item_name = offline_item.name
+
+#                 # ProductVariant 먼저 삭제
+#                 offline_variant.delete()
+
+#                 # InventoryItem 삭제
+#                 offline_item.delete()
+
+#                 # Product가 더 이상 연결된 variant가 없으면 삭제
+#                 if not offline_product.variants.exists():
+#                     offline_product.delete()
+
+#                 return Response(
+#                     {
+#                         "success": True,
+#                         "message": f'상품 "{offline_item_name}"이 성공적으로 병합되었습니다.',
+#                         "merged_product": {
+#                             "variant_code": online_variant.variant_code,
+#                             "product_name": online_product.name,
+#                             "stock": online_variant.stock,  # ← 수정
+#                             "order_count": online_variant.order_count,  # ← 추가(선택)
+#                             "return_count": online_variant.return_count,  # ← 추가(선택)
+#                             "price": (
+#                                 str(online_variant.price)
+#                                 if online_variant.price
+#                                 else None
+#                             ),
+#                         },
+#                     },
+#                     status=status.HTTP_201_CREATED,
+#                 )
+
+#         except InventoryItem.DoesNotExist:
+#             return Response(
+#                 {
+#                     "error": f'관리코드 "{management_code}"에 해당하는 오프라인 상품을 찾을 수 없습니다.'
+#                 },
+#                 status=status.HTTP_404_NOT_FOUND,
+#             )
+
+#         except ProductVariant.DoesNotExist:
+#             return Response(
+#                 {
+#                     "error": f'품목코드 "{management_code}"에 해당하는 온라인 상품을 찾을 수 없거나, 오프라인 상품의 기본 옵션을 찾을 수 없습니다.'
+#                 },
+#                 status=status.HTTP_404_NOT_FOUND,
+#             )
+
+#         except Exception as e:
+#             return Response(
+#                 {"error": f"병합 중 오류가 발생했습니다: {str(e)}"},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             )
+
+
+# class BatchProductMergeView(APIView):
+#     """
+#     POST /batch/merge/products : 여러 상품을 한번에 병합
+
+#     Request Body:
+#     {
+#         "management_codes": ["1234", "5678", "9999"]
+#     }
+#     """
+
+#     def post(self, request, *args, **kwargs):
+#         management_codes = request.data.get("management_codes", [])
+
+#         if not management_codes:
+#             return Response(
+#                 {"error": "병합할 관리코드 목록이 필요합니다."},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+
+#         results = {"success": [], "failed": []}
+
+#         for code in management_codes:
+#             try:
+#                 with transaction.atomic():
+#                     # 단일 병합 로직과 동일
+#                     offline_item = InventoryItem.objects.get(management_code=code)
+#                     online_variant = ProductVariant.objects.get(variant_code=code)
+#                     offline_variant = ProductVariant.objects.get(
+#                         product__inventoryitem=offline_item
+#                     )
+
+#                     # 데이터 병합
+#                     online_variant.stock = (online_variant.stock or 0) + (
+#                         offline_variant.stock or 0
+#                     )
+#                     online_variant.order_count = (online_variant.order_count or 0) + (
+#                         offline_variant.order_count or 0
+#                     )
+#                     online_variant.return_count = (online_variant.return_count or 0) + (
+#                         offline_variant.return_count or 0
+#                     )
+
+#                     if offline_variant.price:
+#                         online_variant.price = offline_variant.price
+#                     if offline_variant.cost_price:
+#                         online_variant.cost_price = offline_variant.cost_price
+
+#                     # 상품명 변경
+#                     online_product = online_variant.product
+#                     offline_item_name = offline_item.name
+#                     online_product.name = offline_item_name
+#                     online_product.save()
+#                     online_variant.save()
+
+#                     # 오프라인 데이터 정리
+#                     offline_product = offline_variant.product
+#                     offline_variant.delete()
+#                     offline_item.delete()
+
+#                     if not offline_product.variants.exists():
+#                         offline_product.delete()
+
+#                     results["success"].append(
+#                         {
+#                             "management_code": code,
+#                             "product_name": offline_item_name,
+#                             "message": "병합 완료",
+#                         }
+#                     )
+
+#             except Exception as e:
+#                 results["failed"].append({"management_code": code, "error": str(e)})
+
+#         return Response(
+#             {
+#                 "results": results,
+#                 "total_success": len(results["success"]),
+#                 "total_failed": len(results["failed"]),
+#             },
+#             status=status.HTTP_200_OK,
+#         )
+#
