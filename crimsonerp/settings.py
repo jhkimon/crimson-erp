@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     "apps.authentication",
     "apps.orders",
     "apps.supplier",
+    "apps.dashboard",
 ]
 
 AUTH_USER_MODEL = "hr.Employee"

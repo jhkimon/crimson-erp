@@ -152,7 +152,7 @@ class VacationRequestView(APIView):
 
     @swagger_auto_schema(
         operation_summary="휴가 신청 등록",
-        operation_description="휴가 신청을 등록합니다. WORK 타입은 관리자만 생성 가능하며 자동으로 승인됩니다.",
+        operation_description="휴가 신청을 등록합니다.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["employee", "leave_type", "start_date", "end_date"],
@@ -185,12 +185,12 @@ class VacationRequestView(APIView):
             start_date = data.get("start_date")
             end_date = data.get("end_date")
 
-            # WORK 타입은 관리자만 생성 가능
-            if leave_type == "WORK" and getattr(request.user, "role", None) != "MANAGER":
-                return Response(
-                    {"error": "근무 배정은 관리자만 생성할 수 있습니다."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+            # # WORK 타입은 관리자만 생성 가능
+            # if leave_type == "WORK" and getattr(request.user, "role", None) != "MANAGER":
+            #     return Response(
+            #         {"error": "근무 배정은 관리자만 생성할 수 있습니다."},
+            #         status=status.HTTP_403_FORBIDDEN
+            #     )
 
             # 중복 일정 검사 (WORK와 APPROVED된 다른 휴가가 겹치는지 확인)
             if leave_type == "WORK":
@@ -259,6 +259,19 @@ class VacationRequestReviewView(APIView):
         if not can_approve_or_reject(request.user) and new_status in ["APPROVED", "REJECTED"]:
             return Response({"error": "권한이 없습니다. 관리자만 승인 또는 거절할 수 있습니다."},
                             status=status.HTTP_403_FORBIDDEN)
+        
+        # 근무가 겹치면 근무 삭제
+        if new_status == "APPROVED":
+            overlapping_work = VacationRequest.objects.filter(
+                employee=vacation.employee,
+                leave_type='WORK',
+                start_date__lte=vacation.end_date,
+                end_date__gte=vacation.start_date
+            )
+            deleted_count = overlapping_work.count()
+            if deleted_count > 0:
+                overlapping_work.delete()
+                print(f"[AUTO DELETE] {vacation.employee.first_name}의 근무일 {deleted_count}건 자동 삭제됨")
 
         # 상태 업데이트 및 기록 시간
         vacation.status = new_status
