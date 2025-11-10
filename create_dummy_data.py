@@ -21,7 +21,7 @@ django.setup()
 # Django 모델 import (django.setup() 이후에 해야 함)
 from apps.hr.models import Employee, VacationRequest
 from apps.inventory.models import InventoryItem, ProductVariant, InventoryAdjustment
-from apps.supplier.models import Supplier, SupplierVariant
+from apps.supplier.models import Supplier
 from apps.orders.models import Order, OrderItem
 from apps.hr.models import Employee
 from django.utils import timezone
@@ -92,7 +92,6 @@ def reset_data():
     """기존 데이터 삭제 (FK 관계 순서 고려)"""
     print_status("기존 데이터를 삭제합니다...", "🔄")
     Order.objects.all().delete()
-    SupplierVariant.objects.all().delete()
     ProductVariant.objects.all().delete()
     InventoryItem.objects.all().delete()
     Supplier.objects.all().delete()
@@ -208,52 +207,8 @@ def create_suppliers(product_variants):
         suppliers.append(supplier)
         print_status(f"공급업체 생성: {name}", "   ✓" if created else "   •")
 
-    # 2. 모든 variant를 최소 하나의 공급업체에 매핑 (순환 방식)
-    supplier_count = len(suppliers)
-    for i, variant in enumerate(product_variants):
-        primary_supplier = suppliers[i % supplier_count]
-        _link_supplier_variant(primary_supplier, variant, is_primary=True)
-
-    # 3. 일부 variant는 추가 supplier 1~2개와 연결 (is_primary=False)
-    extra_variants = random.sample(product_variants, k=int(len(product_variants) * 0.4))  # 약 40%만 추가 연결
-    for variant in extra_variants:
-        available_suppliers = [s for s in suppliers if not SupplierVariant.objects.filter(supplier=s, variant=variant).exists()]
-        extra_suppliers = random.sample(available_suppliers, k=min(len(available_suppliers), random.randint(1, 2)))
-        for supplier in extra_suppliers:
-            _link_supplier_variant(supplier, variant, is_primary=False)
-
     print_status(f"총 {len(suppliers)}개의 공급업체 등록 및 매핑 완료", "✓")
     return suppliers
-
-
-def _link_supplier_variant(supplier, variant, is_primary=False):
-    """SupplierVariant 안전 연결 및 누락 필드 보완"""
-    cost_price = int(variant.price * random.uniform(0.6, 0.8))
-    lead_time_days = random.randint(2, 10)
-
-    sv, created = SupplierVariant.objects.get_or_create(
-        supplier=supplier,
-        variant=variant,
-        defaults={
-            "cost_price": cost_price,
-            "lead_time_days": lead_time_days,
-            "is_primary": is_primary
-        }
-    )
-
-    if not created:
-        updated = False
-        if sv.cost_price is None:
-            sv.cost_price = cost_price
-            updated = True
-        if sv.lead_time_days is None:
-            sv.lead_time_days = lead_time_days
-            updated = True
-        if sv.is_primary is None:
-            sv.is_primary = is_primary
-            updated = True
-        if updated:
-            sv.save()
 
 def create_orders(product_variants):
     print_status("주문 데이터 생성 중...", "📋")
@@ -262,8 +217,12 @@ def create_orders(product_variants):
         print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "⚠️")
         return []
 
+    suppliers = list(Supplier.objects.all())
+    if not suppliers:
+        print_status("공급업체가 없어 주문을 생성할 수 없습니다.", "⚠️")
+        return []
+
     manager_pool = list(Employee.objects.all())
-    print("manager_pool:", manager_pool)
     if not manager_pool:
         print_status("매니저 계정이 없어 주문에 할당할 수 없습니다.", "⚠️")
         return []
@@ -271,29 +230,10 @@ def create_orders(product_variants):
     orders = []
 
     for _ in range(20):
-        # ✅ supplier와 연결된 variant만 필터
-        eligible_variants = [
-            v for v in product_variants
-            if SupplierVariant.objects.filter(variant=v).exists()
-        ]
-        if len(eligible_variants) < 1:
-            continue
-
-        num_items = random.randint(1, 4)
-        selected_variants = random.sample(eligible_variants, k=min(num_items, len(eligible_variants)))
-
-        # ✅ 각 variant가 연결된 supplier 중에서 가장 많이 겹치는 공급업체 선택
-        supplier_counts = {}
-        for variant in selected_variants:
-            for sv in SupplierVariant.objects.filter(variant=variant):
-                supplier_counts[sv.supplier] = supplier_counts.get(sv.supplier, 0) + 1
-
-        if not supplier_counts:
-            continue
-
-        # 가장 많은 variant와 연결된 공급업체 선택
-        supplier = max(supplier_counts.items(), key=lambda x: x[1])[0]
+        supplier = random.choice(suppliers)
         manager = random.choice(manager_pool)
+        num_items = random.randint(1, 4)
+        selected_variants = random.sample(product_variants, k=min(num_items, len(product_variants)))
 
         order = Order.objects.create(
             supplier=supplier,
@@ -306,18 +246,13 @@ def create_orders(product_variants):
         )
 
         for variant in selected_variants:
-            try:
-                supplier_variant = SupplierVariant.objects.get(variant=variant, supplier=supplier)
-            except SupplierVariant.DoesNotExist:
-                continue
-
             OrderItem.objects.create(
                 order=order,
                 variant=variant,
                 item_name=variant.product.name,
                 spec=variant.option,
                 quantity=random.randint(1, 50),
-                unit_price=supplier_variant.cost_price,
+                unit_price=variant.price,  # 그냥 상품 기본 가격 사용
                 remark=random.choice(["단가 협의됨", ""])
             )
 
@@ -325,6 +260,8 @@ def create_orders(product_variants):
 
     print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
     return orders
+
+
 
 def create_vacation_requests(employees):
     """직원별 휴가 요청 더미 데이터 생성"""
