@@ -41,6 +41,7 @@ urlpatterns = [
     path(
         "rollback/<int:id>/", InventoryRollbackView.as_view(), name="inventory-rollback"
     ),
+    path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
     path(
         "variants/stock/<str:variant_code>/",
         StockUpdateView.as_view(),
