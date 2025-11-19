@@ -24,7 +24,7 @@ def daterange(start_date, end_date):
         yield start_date + timedelta(n)
 
 class EmployeeListCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         operation_summary="직원 목록 조회",
