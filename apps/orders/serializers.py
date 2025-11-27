@@ -10,10 +10,11 @@ User = get_user_model()
 class OrderItemSerializer(serializers.ModelSerializer):
     item_name = serializers.SerializerMethodField()
     variant_code = serializers.CharField(source='variant.variant_code', read_only=True)
+    option = serializers.CharField(source='variant.option', read_only=True)
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'variant_code', 'item_name', 'quantity', 'unit', 'unit_price', 'remark', 'spec']
+        fields = ['id', 'variant_code', 'option', 'item_name', 'quantity', 'unit', 'unit_price', 'remark', 'spec']
 
     def get_item_name(self, obj):
         return obj.variant.product.name if obj.variant and obj.variant.product else None
