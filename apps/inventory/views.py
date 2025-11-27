@@ -32,8 +32,7 @@ from .models import (
     ProductVariant,
     InventoryAdjustment,
     InventorySnapshot,
-    InventorySnapshotItem,
-    InventoryCategory,
+    InventorySnapshotItem
 )
 from .serializers import (
     ProductOptionSerializer,
@@ -78,8 +77,9 @@ class InventoryCategoryListView(APIView):
         },
     )
     def get(self, request):
-        names = list(InventoryCategory.objects.values_list("name", flat=True))
-        return Response(names, status=status.HTTP_200_OK)
+        raw = InventoryItem.objects.values_list("category", flat=True)
+        names = sorted(set(c.strip() for c in raw if c))
+        return Response(list(names), status=status.HTTP_200_OK)
 
 
 # 일부 조회 (Product ID 기준)

@@ -19,8 +19,6 @@ class SupplierSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         supplier = Supplier.objects.create(**validated_data)
-
-
         return supplier
 
     def update(self, instance, validated_data):
