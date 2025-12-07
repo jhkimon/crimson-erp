@@ -2,6 +2,10 @@
 *.pyc
 __pycache__/
 
+node_modules/
+*.backup
+*.bak
+
 # Virtual Environment
 venv/
 env/
