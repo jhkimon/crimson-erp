@@ -9,6 +9,8 @@ from apps.inventory.models import (
     InventoryAdjustment
 )
 
+from apps.hr.models import Employee
+from .serializers import InventoryAdjustmentSerializer
 
 class InventoryQuickViewTest(APITestCase):
 

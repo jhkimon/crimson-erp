@@ -1,6 +1,6 @@
 import django_filters
 from django.db.models import F, ExpressionWrapper, IntegerField
-from .models import ProductVariant, InventoryAdjustment
+from .models import ProductVariant, InventoryAdjustment, ProductVariantStatus
 
 class ProductVariantFilter(django_filters.FilterSet):
     stock_lt = django_filters.NumberFilter(field_name="stock", lookup_expr="lt")
@@ -55,3 +55,27 @@ class InventoryAdjustmentFilter(django_filters.FilterSet):
     class Meta:
         model = InventoryAdjustment
         fields = ['variant_code']
+
+
+class ProductVariantStatusFilter(django_filters.FilterSet):
+    year = django_filters.NumberFilter()
+    month = django_filters.NumberFilter()
+    product_code = django_filters.CharFilter(
+        field_name="product__product_id", lookup_expr="icontains"
+    )
+    variant_code = django_filters.CharFilter(
+        field_name="variant__variant_code", lookup_expr="icontains"
+    )
+    category = django_filters.CharFilter(
+        field_name="product__category", lookup_expr="icontains"
+    )
+
+    class Meta:
+        model = ProductVariantStatus
+        fields = [
+            "year",
+            "month",
+            "product_code",
+            "variant_code",
+            "category",
+        ]

@@ -4,13 +4,17 @@ from .views import (
     ProductOptionListView,
     InventoryCategoryListView,
     InventoryItemView,
+    # Upload
+    ProductVariantExcelUploadView,
     # ProductVariant
     ProductVariantView,
     ProductVariantDetailView,
     ProductVariantExportView,
     # Adjustment
     StockUpdateView,
-    InventoryAdjustmentListView
+    InventoryAdjustmentListView,
+    # 엑셀대응
+    ProductVariantStatusListView
 )
 
 urlpatterns = [
@@ -24,6 +28,12 @@ urlpatterns = [
         name="inventory-adjustments",
     ),
     path(
+        "variants/upload-excel/",
+        ProductVariantExcelUploadView.as_view(),
+        name="variant-excel-upload",
+    ),
+
+    path(
         "variants/<str:variant_code>/",
         ProductVariantDetailView.as_view(),
         name="variant-detail",
@@ -33,5 +43,10 @@ urlpatterns = [
         StockUpdateView.as_view(),
         name="stock-update",
     ),
-        path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
+    path(
+        "variant-status/",
+        ProductVariantStatusListView.as_view(),
+        name="variant-status-list",
+    ),
+    path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
 ]

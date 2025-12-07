@@ -3,19 +3,18 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
+######
+# ProductVariantStatus + InventoryItem + ProductVariant = 엑셀 화면
+
 class InventoryItem(models.Model):
     product_id = models.CharField(max_length=50, unique=True, default="P00000")
-    name = models.CharField(max_length=255)
-    management_code = models.CharField(
-        max_length=50, blank=True, null=True, help_text="온라인 품목코드와 매칭용"
-    )
-    category = models.CharField(
-        max_length=50,
-        default="일반",
-        help_text="상품 카테고리 (예: 문구, 도서, 의류 등)",
-    )
+    big_category = models.CharField(max_length=50, blank=True)   # 대분류
+    middle_category = models.CharField(max_length=50, blank=True)  # 중분류
+    category = models.CharField(max_length=50, default="일반")
+    description = models.CharField(max_length=255, blank=True)     # 설명
+    name = models.CharField(max_length=255, blank=True) # 오프라인 이름
+    online_name = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    is_active = models.BooleanField(default=True)  # 병합 후 비활성화 처리용
 
     class Meta:
         db_table = "products"
@@ -25,36 +24,30 @@ class InventoryItem(models.Model):
         return f"{self.product_id} - {self.name}"
 
 
+# Product (Snapshot - 정적인 정보)
 class ProductVariant(models.Model):
     product = models.ForeignKey(
         InventoryItem, on_delete=models.CASCADE, related_name="variants"
-    )
+    )  
+    option = models.CharField(max_length=255) # 옵션
+    detail_option = models.CharField(max_length=255, blank=True, null=True)  # 상세옵션 (주로 사이즈)
     variant_code = models.CharField(max_length=50, unique=True)
-    option = models.CharField(max_length=255)
 
-    stock = models.IntegerField(default=0)
-    min_stock = models.PositiveIntegerField(default=0)
-    price = models.PositiveIntegerField(default=0)
+    stock = models.IntegerField(default=0) # 지금 이 순간의 재고 (= 기말재고)
+    min_stock = models.PositiveIntegerField(default=0) # 재고 알림용
 
     description = models.TextField(blank=True, default="")
     channels = models.JSONField(default=list, blank=True)
 
     memo = models.TextField(blank=True, default="")
-    cost_price = models.PositiveIntegerField(default=0)
+    cost_price = models.PositiveIntegerField(default=0) # 원가 (order 원가 저장용)
+    price = models.PositiveIntegerField(default=0) # 판매가
+    is_active = models.BooleanField(default=True) # 제품 삭제시 대응
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    # 임시 재고 조정값 (재고 불일치 보정용)
-    adjustment = models.IntegerField(default=0)
+    adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용)
 
-    @property
-    def available_stock(self):
-        """판매 가능한 실제 재고량"""
-        return max(0, self.stock - self.reserved_stock)
-
-    order_count = models.PositiveIntegerField(default=0)
-    return_count = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "product_variants"
@@ -62,6 +55,31 @@ class ProductVariant(models.Model):
 
     def __str__(self):
         return f"{self.variant_code}({self.option})"
+
+# Product (Active - 동적인 정보)
+class ProductVariantStatus(models.Model):
+    year = models.IntegerField()
+    month = models.IntegerField()
+
+    product = models.ForeignKey(InventoryItem, on_delete=models.CASCADE)
+    variant = models.ForeignKey(ProductVariant, on_delete=models.CASCADE)
+
+    warehouse_stock_start = models.IntegerField(default=0)  # 월초창고
+    store_stock_start = models.IntegerField(default=0)      # 월초매장
+
+    inbound_quantity = models.IntegerField(default=0)       # 당월입고 (나중에 order가 해당 내용 조정)
+
+    store_sales = models.IntegerField(default=0)            # 매장판매
+    online_sales = models.IntegerField(default=0)           # 쇼핑몰판매
+
+    stock_adjustment = models.IntegerField(default=0)
+    stock_adjustment_reason = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("year", "month", "variant")
+
 
 
 # 재고 조정용 필드
