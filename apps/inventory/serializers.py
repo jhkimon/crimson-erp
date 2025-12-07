@@ -2,31 +2,14 @@ from rest_framework import serializers
 from .models import (
     InventoryItem,
     ProductVariant,
-    InventoryAdjustment,
-    InventorySnapshot,
-    InventorySnapshotItem,
+    InventoryAdjustment
 )
 
-
-class ProductOptionSerializer(serializers.ModelSerializer):
+####### Base Serializer: InventoryItem, ProductVariant, InventoryAdjustment
+class InventoryItemSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = ["id", "product_id", "name"]
-
-
-class InventoryItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = InventoryItem
-        fields = [
-            "id",
-            "product_id",
-            "name",
-            "category",
-            "management_code",
-            "created_at",
-            "is_active",
-        ]
-
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 
@@ -59,7 +42,6 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get("request")
-        # POST, PUT, PATCH 요청 시에는 기본 정보 필드 입력 제거
         if request and request.method in ["POST", "PUT", "PATCH"]:
             fields.pop("inventory_item", None)
             fields.pop("product_id", None)
@@ -80,10 +62,29 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     def get_category(self, obj):
         return obj.product.category if obj.product else None
 
+class InventoryAdjustmentSerializer(serializers.ModelSerializer):
+    variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
+    product_id = serializers.CharField(
+        source="variant.product.product_id", read_only=True
+    )
+    product_name = serializers.CharField(source="variant.product.name", read_only=True)
 
+    class Meta:
+        model = InventoryAdjustment
+        fields = [
+            "id",
+            "variant_code",
+            "product_id",
+            "product_name",
+            "delta",
+            "reason",
+            "created_by",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+####### 변형 Serializer: InventoryItem (+ ProductVariant), ProductVariant 쓰기용
 # 간단한 응답용 시리얼라이저들
-
-
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
     variants = serializers.SerializerMethodField()
 
@@ -98,7 +99,7 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
         ).data
 
 
-class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
+class ProductVariantWriteSerializer(serializers.ModelSerializer):
     product_id = serializers.CharField(source="product.product_id", read_only=True)
     name = serializers.CharField(source="product.name", required=False)
     option = serializers.CharField(required=False)
@@ -190,113 +191,3 @@ class ProductVariantFullUpdateSerializer(serializers.ModelSerializer):
             instance.save(update_fields=list(dict.fromkeys(dirty_fields)))
         return instance
 
-
-# Swagger용
-class ProductVariantCreateSerializer(ProductVariantFullUpdateSerializer):
-    class Meta(ProductVariantFullUpdateSerializer.Meta):
-        fields = [
-            f
-            for f in ProductVariantFullUpdateSerializer.Meta.fields
-            if f != "variant_code"
-        ]
-
-
-# 재고조정용 Serailizer
-class InventoryAdjustmentSerializer(serializers.ModelSerializer):
-    variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
-    product_id = serializers.CharField(
-        source="variant.product.product_id", read_only=True
-    )
-    product_name = serializers.CharField(source="variant.product.name", read_only=True)
-
-    class Meta:
-        model = InventoryAdjustment
-        fields = [
-            "id",
-            "variant_code",
-            "product_id",
-            "product_name",
-            "delta",
-            "reason",
-            "created_by",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-
-class InventorySnapshotItemSerializer(serializers.ModelSerializer):
-    variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
-    option = serializers.CharField(source="variant.option", read_only=True)
-
-    class Meta:
-        model = InventorySnapshotItem
-        fields = [
-            "id",
-            "variant",  # FK id (nullable)
-            "product_id",
-            "name",
-            "category",
-            "variant_code",
-            "option",
-            "stock",
-            "price",
-            "order_count",
-            "return_count",
-            "sales",
-        ]
-        read_only_fields = fields
-
-
-class InventorySnapshotSerializer(serializers.ModelSerializer):
-    actor_name = serializers.SerializerMethodField()
-    items = InventorySnapshotItemSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = InventorySnapshot
-        fields = ["id", "created_at", "reason", "actor_name", "meta", "items"]
-
-    def get_actor_name(self, obj):
-        if obj.actor and obj.actor.first_name:
-            return obj.actor.first_name
-        return getattr(obj.actor, "username", None)
-
-
-# class ProductMatchSerializer(serializers.Serializer):
-#     """매칭 결과를 보여주는 시리얼라이저"""
-
-#     offline_product_id = serializers.CharField()
-#     offline_product_name = serializers.CharField()
-#     online_variant_code = serializers.CharField()
-#     online_product_name = serializers.CharField()
-#     match_status = serializers.CharField()  # 'matched', 'no_match', 'already_matched'
-
-
-# class ProductMatchingRequestSerializer(serializers.Serializer):
-#     """매칭 요청용 시리얼라이저"""
-
-#     auto_apply = serializers.BooleanField(
-#         default=False, help_text="자동으로 매칭 결과를 적용할지 여부"
-#     )
-
-
-# class ProductMatchingResponseSerializer(serializers.Serializer):
-#     """매칭 응답용 시리얼라이저"""
-
-#     total_offline_products = serializers.IntegerField()
-#     total_online_products = serializers.IntegerField()
-#     matched_count = serializers.IntegerField()
-#     already_matched_count = serializers.IntegerField()
-#     no_match_count = serializers.IntegerField()
-#     matches = ProductMatchSerializer(many=True)
-#     applied = serializers.BooleanField()  # auto_apply가 True일 때 실제 적용되었는지
-
-
-# # 병합 전 미리보기용
-# class ProductPhysicalMergePreviewSerializer(serializers.Serializer):
-#     pass
-
-
-# # 병합 요청용
-# class ProductPhysicalMergeRequestSerializer(serializers.Serializer):
-#     management_code = serializers.CharField()
-#     confirm = serializers.BooleanField(default=False)

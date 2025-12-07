@@ -55,7 +55,6 @@ class ProductVariant(models.Model):
     order_count = models.PositiveIntegerField(default=0)
     return_count = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
-    channels = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "product_variants"
@@ -83,65 +82,3 @@ class InventoryAdjustment(models.Model):
 
     def __str__(self):
         return f"Adjustment for {self.variant.variant_code}: {self.delta}"
-
-
-class InventorySnapshot(models.Model):
-    created_at = models.DateTimeField(default=timezone.now, db_index=True)
-    reason = models.CharField(
-        max_length=200, blank=True, help_text="스냅샷 사유 (예: POS 덮어쓰기 전)"
-    )
-    actor = models.ForeignKey(
-        getattr(settings, "AUTH_USER_MODEL", "auth.User"),
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="inventory_snapshots",
-    )
-    meta = models.JSONField(
-        default=dict, blank=True
-    )  # 요청 payload, 파일명 등 부가정보
-
-
-def __str__(self):
-    actor_name = ""
-    if self.actor and self.actor.first_name:
-        actor_name = self.actor.first_name
-    elif self.actor:
-        actor_name = getattr(self.actor, "username", "Unknown")
-    else:
-        actor_name = "System"
-
-    return f"Snapshot#{self.id} @ {self.created_at:%Y-%m-%d %H:%M:%S} ({self.reason}) by {actor_name}"
-
-
-class InventorySnapshotItem(models.Model):
-    snapshot = models.ForeignKey(
-        InventorySnapshot, on_delete=models.CASCADE, related_name="items"
-    )
-
-    variant = models.ForeignKey(
-        "ProductVariant",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="+",
-    )
-    # 스냅샷 시점의 값(denormalized)
-    product_id = models.CharField(max_length=32, db_index=True)
-    name = models.CharField(max_length=255)
-    category = models.CharField(max_length=64)
-    variant_code = models.CharField(max_length=64, db_index=True)
-    option = models.CharField(max_length=255, blank=True)
-
-    stock = models.IntegerField()
-    price = models.IntegerField()
-    cost_price = models.IntegerField()
-    order_count = models.IntegerField(default=0)
-    return_count = models.IntegerField(default=0)
-    sales = models.IntegerField(default=0)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["snapshot", "variant_code"]),
-            models.Index(fields=["product_id"]),
-        ]
