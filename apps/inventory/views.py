@@ -822,6 +822,7 @@ class ProductVariantStatusListView(generics.ListAPIView):
     ordering = ["product__product_id", "variant__variant_code"]
 
     @swagger_auto_schema(
+        operation_summary="재고 현황 확인",
         manual_parameters=[
             openapi.Parameter(
                 "year", openapi.IN_QUERY,

@@ -10,7 +10,7 @@ class InventoryItem(models.Model):
     product_id = models.CharField(max_length=50, unique=True, default="P00000")
     big_category = models.CharField(max_length=50, blank=True)   # 대분류
     middle_category = models.CharField(max_length=50, blank=True)  # 중분류
-    category = models.CharField(max_length=50, default="일반")
+    category = models.CharField(max_length=50, default="일반") # 카테고리
     description = models.CharField(max_length=255, blank=True)     # 설명
     name = models.CharField(max_length=255, blank=True) # 오프라인 이름
     online_name = models.CharField(max_length=255, blank=True, null=True)

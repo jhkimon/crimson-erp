@@ -1,394 +1,331 @@
 #!/usr/bin/env python3
-"""
-CrimsonERP 프로젝트용 더미데이터 생성 스크립트
-프론트엔드 개발자가 복잡한 DB 설정 없이 바로 API 테스트할 수 있도록 함
-
-실행: python create_dummy_data.py
-옵션: --reset (기존 데이터 삭제 후 새로 생성), --force (기존 데이터 있어도 추가)
-"""
-
 import os
-import sys
 import django
 import random
 import argparse
-from datetime import datetime, timedelta
-
-# Django 설정 초기화
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crimsonerp.settings')
-django.setup()
-
-# Django 모델 import (django.setup() 이후에 해야 함)
-from apps.hr.models import Employee, VacationRequest
-from apps.inventory.models import InventoryItem, ProductVariant, InventoryAdjustment
-from apps.supplier.models import Supplier
-from apps.orders.models import Order, OrderItem
-from apps.hr.models import Employee
+from datetime import timedelta, date
 from django.utils import timezone
 
-# 레퍼런스 참고: 한국어 더미데이터
-EMPLOYEES_DATA = [
-    ("admin", "MANAGER", "010-1234-5678", "APPROVED", True, True, "유시진"),
-    ("manager1", "MANAGER", "010-2345-6789", "APPROVED", False, True, "넥스트"),
-    ("staff1", "STAFF", "010-3456-7890", "APPROVED", False, False, "배연준"),
-    ("staff2", "STAFF", "010-4567-8901", "DENIED", False, False, "김정현"),
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "crimsonerp.settings")
+django.setup()
+
+# =====================
+# 모델 import
+# =====================
+from apps.hr.models import Employee, VacationRequest
+from apps.inventory.models import (
+    InventoryItem,
+    ProductVariant,
+    ProductVariantStatus,
+    InventoryAdjustment,
+)
+from apps.supplier.models import Supplier
+from apps.orders.models import Order, OrderItem
+
+# =====================
+# 더미 데이터 정의
+# =====================
+EMPLOYEES = [
+    {
+        "username": "admin",
+        "name": "유시진",
+        "role": "MANAGER",
+        "is_superuser": True,
+        "is_staff": True,
+        "allowed_tabs": ["SUPPLIER", "ORDER", "INVENTORY", "HR"],
+        "gender": "MALE",
+    },
+    {
+        "username": "manager1",
+        "name": "넥스트",
+        "role": "MANAGER",
+        "is_superuser": False,
+        "is_staff": True,
+        "allowed_tabs": ["ORDER", "INVENTORY"],
+        "gender": "MALE",
+    },
+    {
+        "username": "staff1",
+        "name": "배연준",
+        "role": "STAFF",
+        "is_superuser": False,
+        "is_staff": False,
+        "allowed_tabs": ["INVENTORY"],
+        "gender": "MALE",
+    },
+    {
+        "username": "staff2",
+        "name": "김정현",
+        "role": "STAFF",
+        "is_superuser": False,
+        "is_staff": False,
+        "allowed_tabs": ["INVENTORY"],
+        "gender": "FEMALE",
+    },
 ]
 
-PRODUCTS_DATA = [
-    "2025년 탁상용 달력",
-    "2025년 벽걸이 달력",
-    "미니 에코백 (코리아)",
-    "L 홀더 (파일)",
-    "수저 세트",
-    "방패 필통",
-    "고려대 피규어 키링",
-    "세도나 볼펜",
-    "슬립 텀블러",
-    "호이 야구잠바 인형",
-    "호이 키링 인형"
+PRODUCTS = [
+    ("P00001", "2025년 탁상용 달력"),
+    ("P00002", "미니 에코백"),
+    ("P00003", "수저 세트"),
+    ("P00004", "텀블러"),
 ]
 
-VARIANT_DATA = [
-    ("P00000OD", None, "2025년 탁상용 달력", "", 9000, 0, 65, 0),
-    ("P0000BDB", None, "2025년 탁상용 달력", "", 9000, 0, 64, 0),
-    ("P00000NB", None, "미니 에코백 (코리아)", "", 6000, 0, 50, 0),
-    ("P00000XN", "P00000XN000A", "L 홀더 (파일)", "디자인 : 초충도첩 식물", 500, 74, 35, 0),
-    ("P0000BBO", None, "수저 세트", "", 12000, 0, 22, 1),
-    ("P00000YC", "P00000YC000A", "방패 필통", "색상 : 크림슨", 5000, 100, 19, 0),
-    ("P00000ZQ", "P00000ZQ000A", "고려대 피규어 키링", "디자인 : 남학생", 8800, 90, 16, 0),
-    ("P00000PR", "P00000PR000A", "슬립 텀블러", "색상 : 아이보리", 19000, 40, 15, 0),
-    ("P00000OY", None, "호이 야구잠바 인형", "", 27000, 0, 15, 0),
-    ("P00000OW", "P00000OW000B", "호이 키링 인형", "색상 : 크림슨", 12000, 0, 14, 0),
-    ("P00000YC", "P00000YC000C", "방패 필통", "색상 : 블랙", 5000, 0, 13, 0),
+VARIANTS = [
+    ("P00001", "P00001-A", "기본", 9000, 50),
+    ("P00002", "P00002-A", "오프화이트", 6000, 30),
+    ("P00003", "P00003-A", "1세트", 12000, 20),
+    ("P00004", "P00004-A", "아이보리", 19000, 15),
 ]
 
-
-SUPPLIERS_DATA = [
-    ("대한유통", "010-6675-7797", "박한솔", "hspark_factcorp@kakao.com", "서울특별시 성북구 안암로145"),
-    ("삼성상사", "010-1234-5678", "김진수", "samsung@corp.com", "서울특별시 강남구 테헤란로 311"),
-    ("LG트레이딩", "010-8888-9999", "이현주", "lgtrade@lg.com", "서울특별시 마포구 월드컵북로 396"),
-    ("넥스트물류", "010-2222-3333", "정민호", "nextlogi@next.com", "경기도 성남시 판교로 242"),
+SUPPLIERS = [
+    ("대한유통", "010-1111-2222", "박한솔"),
+    ("삼성상사", "010-3333-4444", "김진수"),
 ]
 
-COLORS = ["블랙", "화이트", "실버", "골드", "블루", "레드", "그린", "퍼플"]
-ORDER_STATUSES = ["PENDING", "APPROVED", "CANCELLED"]
+ORDER_STATUSES = [
+    Order.STATUS_PENDING,
+    Order.STATUS_APPROVED,
+    Order.STATUS_COMPLETED,
+]
 
+# =====================
+# 유틸
+# =====================
+def log(msg, emoji="•"):
+    print(f"{emoji} {msg}")
 
-def print_status(message, emoji="🔹"):
-    """상태 메시지 출력"""
-    print(f"{emoji} {message}")
-
-
-def has_existing_data():
-    """기존 데이터가 있는지 확인"""
-    return (
-        Employee.objects.exists() or 
-        InventoryItem.objects.exists() or 
-        Order.objects.exists()
-    )
-
-
+# =====================
+# 리셋
+# =====================
 def reset_data():
-    """기존 데이터 삭제 (FK 관계 순서 고려)"""
-    print_status("기존 데이터를 삭제합니다...", "🔄")
+    log("기존 데이터 삭제 중...", "🔄")
+    OrderItem.objects.all().delete()
     Order.objects.all().delete()
+    InventoryAdjustment.objects.all().delete()
+    ProductVariantStatus.objects.all().delete()
     ProductVariant.objects.all().delete()
     InventoryItem.objects.all().delete()
     Supplier.objects.all().delete()
+    VacationRequest.objects.all().delete()
     Employee.objects.all().delete()
-    print_status("기존 데이터 삭제 완료", "✓")
+    log("기존 데이터 삭제 완료", "✓")
 
-
+# =====================
+# 직원
+# =====================
 def create_employees():
-    """직원 데이터 생성 (레퍼런스 참고)"""
-    print_status("직원 데이터 생성 중...", "👥")
-    
+    log("직원 생성", "👥")
     employees = []
-    for username, role, contact, status, is_superuser, is_staff, real_name in EMPLOYEES_DATA:
-        
-        if not Employee.objects.filter(username=username).exists():
-            employee = Employee.objects.create_user(
-                username=username,
-                email=f'{username}@crimsonerp.com',
-                password='crimson123',  # 테스트용 통일 비밀번호
-                first_name=real_name,
-                last_name='',
-                role=role,
-                contact=contact,
-                status=status,
-                is_superuser=is_superuser,
-                is_staff=is_staff,
-            )
-            employees.append(employee)
-            print_status(f"직원 생성: {real_name} ({username}, {role})", "   ✓")
-        else:
-            employees.append(Employee.objects.get(username=username))
-    
+
+    for e in EMPLOYEES:
+        user = Employee.objects.create_user(
+            username=e["username"],
+            password="crimson123",
+            first_name=e["name"],
+            role=e["role"],
+            status="APPROVED",
+            is_superuser=e["is_superuser"],
+            is_staff=e["is_staff"],
+            allowed_tabs=e["allowed_tabs"],
+            gender=e["gender"],
+            hire_date=date.today() - timedelta(days=random.randint(30, 700)),
+        )
+        employees.append(user)
+
     return employees
 
+# =====================
+# 휴가
+# =====================
+def create_vacations(employees):
+    log("휴가 요청 생성", "🌴")
 
-def create_inventory_items():
-    """VARIANT_DATA 기반으로 상품 생성"""
-    print_status("상품 데이터 생성 중...", "📦")
+    for emp in employees:
+        for _ in range(random.randint(1, 3)):
+            start = date.today() - timedelta(days=random.randint(1, 60))
+            end = start + timedelta(days=random.randint(0, 2))
 
-    seen = set()
-    inventory_items = []
-
-    for product_id, _, product_name, *_ in VARIANT_DATA:
-        if product_id in seen:
-            continue
-        seen.add(product_id)
-
-        if not InventoryItem.objects.filter(product_id=product_id).exists():
-            item = InventoryItem.objects.create(
-                product_id=product_id,
-                name=product_name
+            VacationRequest.objects.create(
+                employee=emp,
+                leave_type=random.choice([
+                    "VACATION",
+                    "HALF_DAY_AM",
+                    "HALF_DAY_PM",
+                    "SICK",
+                ]),
+                start_date=start,
+                end_date=end,
+                status=random.choice([
+                    "APPROVED",
+                    "PENDING",
+                    "REJECTED",
+                ]),
+                reason="개발용 더미 휴가",
+                reviewed_at=timezone.now(),
             )
-            inventory_items.append(item)
-            print_status(f"상품 생성: {product_name} ({product_id})", "   ✓")
-        else:
-            inventory_items.append(InventoryItem.objects.get(product_id=product_id))
 
-    return inventory_items
+# =====================
+# 상품
+# =====================
+def create_products():
+    log("상품 생성 (대분류/중분류/카테고리 포함)", "📦")
+    items = []
 
-def create_product_variants(inventory_items):
-    """실제 상품 및 옵션 기반으로 ProductVariant 생성"""
-    print_status("상품 옵션 생성 중 (실제값 기반)...", "🎯")
-    product_variants = []
+    for pid, name in PRODUCTS:
+        item = InventoryItem.objects.create(
+            product_id=pid,
 
-    # InventoryItem dict for fast lookup
-    product_dict = {item.product_id: item for item in inventory_items}
+            # 엑셀 기준 필드
+            big_category="굿즈",
+            middle_category="문구" if "달력" in name or "홀더" in name else "생활용품",
+            category="일반",
 
-    for product_id, variant_code, name, option, price, stock, order_count, return_count in VARIANT_DATA:
-        if product_id not in product_dict:
-            continue  # 해당 상품이 inventory에 없으면 생략
-
-        product = product_dict[product_id]
-        final_variant_code = variant_code or f"{product_id}000A"
-
-        if not ProductVariant.objects.filter(variant_code=final_variant_code).exists():
-            variant = ProductVariant.objects.create(
-                product=product,
-                variant_code=final_variant_code,
-                option=option or "기본",
-                stock=stock,
-                min_stock=random.randint(1, 10),
-                price=price,
-                description=f"{name} {option}".strip(),
-                memo=random.choice(["", "인기 상품", "한정 재고"]),
-                order_count=order_count,
-                return_count=return_count,
-                is_active=True,
-            )
-            product_variants.append(variant)
-        else:
-            variant = ProductVariant.objects.get(variant_code=final_variant_code)
-            product_variants.append(variant)
-
-    print_status(f"실제 상품 옵션 생성 완료: {len(product_variants)}개", "   ✓")
-    return product_variants
-
-def create_suppliers(product_variants):
-    """공급업체 및 SupplierVariant 연결"""
-    print_status("공급업체 데이터 생성 중...", "🏢")
-
-    # 1. 공급업체 생성
-    suppliers = []
-    for name, contact, manager, email, address in SUPPLIERS_DATA:
-        supplier, created = Supplier.objects.get_or_create(
-            name=name,
-            defaults={
-                "contact": contact,
-                "manager": manager,
-                "email": email,
-                "address": address,
-            }
+            name=name,                       # 오프라인 품목명
+            online_name=f"[온라인] {name}",  # 온라인 품목명
+            description=f"{name} 더미 상품 설명입니다.",
         )
-        suppliers.append(supplier)
-        print_status(f"공급업체 생성: {name}", "   ✓" if created else "   •")
+        items.append(item)
 
-    print_status(f"총 {len(suppliers)}개의 공급업체 등록 및 매핑 완료", "✓")
+    return items
+
+def create_variants(items):
+    log("상품 옵션 생성", "🎯")
+    variants = []
+    item_map = {i.product_id: i for i in items}
+
+    for pid, code, option, price, stock in VARIANTS:
+        variant = ProductVariant.objects.create(
+            product=item_map[pid],
+            variant_code=code,
+            option=option,
+            price=price,
+            cost_price=int(price * 0.6),
+            stock=stock,
+            min_stock=5,
+            memo="더미 데이터",
+        )
+        variants.append(variant)
+
+    return variants
+
+# =====================
+# 공급업체
+# =====================
+def create_suppliers():
+    log("공급업체 생성", "🏢")
+    suppliers = []
+
+    for name, contact, manager in SUPPLIERS:
+        suppliers.append(
+            Supplier.objects.create(
+                name=name,
+                contact=contact,
+                manager=manager,
+                address="서울시 성북구",
+            )
+        )
     return suppliers
 
-def create_orders(product_variants):
-    print_status("주문 데이터 생성 중...", "📋")
+# =====================
+# 주문
+# =====================
+def create_orders(variants, suppliers, employees):
+    log("주문 생성", "📋")
 
-    if not product_variants:
-        print_status("상품 옵션이 없어 주문을 생성할 수 없습니다.", "⚠️")
-        return []
-
-    suppliers = list(Supplier.objects.all())
-    if not suppliers:
-        print_status("공급업체가 없어 주문을 생성할 수 없습니다.", "⚠️")
-        return []
-
-    manager_pool = list(Employee.objects.all())
-    if not manager_pool:
-        print_status("매니저 계정이 없어 주문에 할당할 수 없습니다.", "⚠️")
-        return []
-
-    orders = []
-
-    for _ in range(20):
+    for _ in range(10):
         supplier = random.choice(suppliers)
-        manager = random.choice(manager_pool)
-        num_items = random.randint(1, 4)
-        selected_variants = random.sample(product_variants, k=min(num_items, len(product_variants)))
+        manager = random.choice(employees)
 
         order = Order.objects.create(
             supplier=supplier,
             manager=manager,
+            order_date=date.today() - timedelta(days=random.randint(1, 30)),
+            expected_delivery_date=date.today() + timedelta(days=7),
             status=random.choice(ORDER_STATUSES),
-            order_date=timezone.now() - timedelta(days=random.randint(0, 30)),
-            expected_delivery_date=timezone.now() + timedelta(days=random.randint(2, 14)),
-            instruction_note=random.choice(["포장 필수", "입고 후 확인 전화 요망", "문 앞 비대면 수령", ""]),
-            note=random.choice(["긴급 요청", "기본 주문", ""])
+            note="더미 주문",
         )
 
-        for variant in selected_variants:
+        for v in random.sample(variants, k=random.randint(1, 3)):
             OrderItem.objects.create(
                 order=order,
-                variant=variant,
-                item_name=variant.product.name,
-                spec=variant.option,
-                quantity=random.randint(1, 50),
-                unit_price=variant.price,  # 그냥 상품 기본 가격 사용
-                remark=random.choice(["단가 협의됨", ""])
+                variant=v,
+                item_name=v.product.name,
+                spec=v.option,
+                quantity=random.randint(1, 20),
+                unit_price=v.price,
             )
 
-        orders.append(order)
+# =====================
+# 재고 조정
+# =====================
+def create_inventory_adjustments(variants, employees):
+    log("재고 조정 생성", "🔧")
 
-    print_status(f"주문 데이터 생성 완료: {len(orders)}개", "✓")
-    return orders
-
-
-
-def create_vacation_requests(employees):
-    """직원별 휴가 요청 더미 데이터 생성"""
-    print_status("휴가 요청 데이터 생성 중...", "🌴")
-
-    LEAVE_TYPES = ['VACATION', 'HALF_DAY_AM', 'HALF_DAY_PM', 'SICK', 'OTHER']
-    STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']
-
-    count = 0
-    for employee in employees:
-        n_requests = random.randint(2, 4)
-        for _ in range(n_requests):
-            leave_type = random.choice(LEAVE_TYPES)
-            status = random.choice(STATUSES)
-            start_date = timezone.now().date() + timedelta(days=random.randint(-30, 30))
-            if leave_type in ['HALF_DAY_AM', 'HALF_DAY_PM']:
-                end_date = start_date
-            else:
-                end_date = start_date + timedelta(days=random.randint(0, 3))
-
-            VacationRequest.objects.create(
-                employee=employee,
-                leave_type=leave_type,
-                start_date=start_date,
-                end_date=end_date,
-                reason=random.choice(["개인 사정", "가족 행사", "병원 진료", "휴식 필요", "기타"]),
-                status=status,
-                reviewed_at=timezone.now() if status != 'PENDING' else None
-            )
-            count += 1
-    print_status(f"총 {count}개의 휴가 요청 생성 완료", "   ✓")
-
-def create_inventory_adjustments(product_variants):
-    """ProductVariant 기반 재고 조정 더미 생성"""
-    print_status("재고 조정 데이터 생성 중...", "🔧")
-
-    if not product_variants:
-        print_status("상품 옵션이 없어 재고 조정을 생성할 수 없습니다.", "⚠️")
-        return []
-
-    reasons = ["입고 오류 수정", "파손/불량", "기초 재고 등록", "정기 재고조사", "기타"]
-    adjustments = []
-
-    for variant in random.sample(product_variants, k=min(5, len(product_variants))):
+    for v in random.sample(variants, k=min(3, len(variants))):
         delta = random.randint(-5, 10)
-        reason = random.choice(reasons)
-        created_by = random.choice(Employee.objects.filter(is_staff=True)).username  # 사용자명
 
-        # 재고 업데이트
-        variant.stock = max(0, variant.stock + delta)
-        variant.save()
-
-        adjustment = InventoryAdjustment.objects.create(
-            variant=variant,
+        InventoryAdjustment.objects.create(
+            variant=v,
             delta=delta,
-            reason=reason,
-            created_by=created_by,
+            reason="개발용 재고 보정",
+            created_by=random.choice(employees).username,
         )
 
-        adjustments.append(adjustment)
+        v.stock = max(0, v.stock + delta)
+        v.save()
 
-    print_status(f"총 {len(adjustments)}개의 재고 조정 생성 완료", "   ✓")
-    return adjustments
+# =====================
+# 상품 월별 상태
+# =====================
 
-def display_summary():
-    """생성된 데이터 요약 표시 (레퍼런스 스타일)"""
-    print("\n" + "="*50)
-    print("📊 생성된 더미데이터 요약:")
-    print(f"   👥 직원: {Employee.objects.count()}명")
-    print(f"   📦 상품: {InventoryItem.objects.count()}개")
-    print(f"   🎨 상품옵션: {ProductVariant.objects.count()}개") 
-    print(f"   📋 주문: {Order.objects.count()}개")
-    print(f"   🏢 공급업체: {Supplier.objects.count()}개")
-    print(f"   🌴 휴가 요청: {VacationRequest.objects.count()}개")
-    print(f"   🔧 재고 조정 기록: {InventoryAdjustment.objects.count()}개")
-    
-    print("\n🔑 테스트 계정 정보:")
-    
-    print("\n🔑 테스트 계정 정보:")
-    print("   - admin / crimson123 (관리자)")
-    print("   - manager1 / crimson123 (매니저)")
-    print("   - staff1 / crimson123 (스태프)")
-    print("   - staff2 / crimson123 (스태프, 비활성)")
-    
-    print("\n🚀 이제 다음 명령어로 서버를 시작할 수 있습니다:")
-    print("   python manage.py runserver")
-    print("\n📖 API 문서:")
-    print("   http://localhost:8000/swagger/")
-    print("="*50)
+def create_product_variant_statuses(variants):
+    print("📊 상품 월별 상태(ProductVariantStatus) 생성 중...")
 
+    today = timezone.now().date()
+    year = today.year
+    month = today.month
 
+    for variant in variants:
+        ProductVariantStatus.objects.create(
+            year=year,
+            month=month,
+            product=variant.product,
+            variant=variant,
+            warehouse_stock_start=random.randint(0, 50),
+            store_stock_start=random.randint(0, 30),
+            inbound_quantity=random.randint(0, 40),
+            store_sales=random.randint(0, 20),
+            online_sales=random.randint(0, 15),
+            stock_adjustment=variant.adjustment,
+            stock_adjustment_reason="더미 생성",
+        )
 
+    print(f"   ✓ {len(variants)}개의 ProductVariantStatus 생성 완료")
+
+# =====================
+# 메인
+# =====================
 def main():
-    parser = argparse.ArgumentParser(description='CrimsonERP 더미데이터 생성')
-    parser.add_argument('--reset', action='store_true', help='기존 데이터를 모두 삭제하고 새로 생성')
-    parser.add_argument('--force', action='store_true', help='기존 데이터가 있어도 강제로 추가')
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reset", action="store_true")
     args = parser.parse_args()
-    
-    print("🎯 CrimsonERP 더미데이터 생성을 시작합니다...")
-    
-    # Reset 옵션이 있으면 기존 데이터 삭제
+
+    print("🎯 CrimsonERP 더미데이터 생성 시작")
+
     if args.reset:
         reset_data()
-    
-    # 이미 데이터가 있는지 체크
-    if not args.force and not args.reset and has_existing_data():
-        print("⚠️  이미 데이터가 존재합니다. --force 또는 --reset 옵션을 사용해주세요.")
-        print("   예시: python create_dummy_data.py --force")
-        return
-    
-    try:
-        # 레퍼런스 참고: 순서대로 생성 (FK 관계 고려)
-        employees = create_employees()
-        inventory_items = create_inventory_items()
-        product_variants = create_product_variants(inventory_items)
-        suppliers = create_suppliers(product_variants)
-        orders = create_orders(product_variants)
-        vacation_requests = create_vacation_requests(employees)
-        inventory_adjustments = create_inventory_adjustments(product_variants)
-        
-        print_status("더미데이터 생성이 완료되었습니다!", "✅")
-        display_summary()
-        
-    except Exception as e:
-        print_status(f"더미데이터 생성 중 오류가 발생했습니다: {str(e)}", "❌")
-        raise
+
+    employees = create_employees()
+    create_vacations(employees)
+    items = create_products()
+    variants = create_variants(items)
+    create_product_variant_statuses(variants)
+    suppliers = create_suppliers()
+    create_orders(variants, suppliers, employees)
+    create_inventory_adjustments(variants, employees)
+
+    print("\n✅ 더미데이터 생성 완료")
 
 if __name__ == "__main__":
-    main() 
+    main()

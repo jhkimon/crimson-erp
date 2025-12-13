@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from apps.orders.service import complete_order
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.filters import OrderingFilter
@@ -12,7 +13,6 @@ from apps.inventory.models import ProductVariant
 from .serializers import OrderWriteSerializer, OrderReadSerializer, OrderCompactSerializer
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from apps.utils.email_utils import send_order_created_email, send_order_approved_email
 
 class OrderListView(APIView):
     permission_classes = [AllowAny]
@@ -88,7 +88,6 @@ class OrderListView(APIView):
             order = serializer.save()
             # 응답은 읽기용으로 직렬화
             read_serializer = OrderReadSerializer(order)
-            send_order_created_email(order)
             return Response(read_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -148,88 +147,50 @@ class OrderDetailView(APIView):
         if not order:
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        new_status = request.data.get('status')
+        new_status = request.data.get("status")
         if not new_status:
             return Response({"error": "Missing 'status'"}, status=status.HTTP_400_BAD_REQUEST)
 
         valid_statuses = [choice[0] for choice in Order.ORDER_STATUS_CHOICES]
         if new_status not in valid_statuses:
-            return Response({
-                "error": f"'{new_status}'는 유효하지 않은 상태입니다.",
-                "valid_choices": valid_statuses
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {"error": "유효하지 않은 상태", "valid": valid_statuses},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         previous_status = order.status
-        order.status = new_status
-        order.save()
 
-        # 이전 상태와 동일
+        # COMPLETED 이후 롤백 금지
+        if previous_status == Order.STATUS_COMPLETED:
+            return Response(
+                {"error": "COMPLETED 상태의 주문은 변경할 수 없습니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 동일 상태 변경 방지
         if previous_status == new_status:
-            return Response({
-                "error": "이미 동일한 상태입니다. 상태를 변경하려면 다른 값을 입력하세요.",
-                "status": new_status
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {"error": "이미 동일한 상태입니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # APPROVED 로 변경시.
-        if previous_status != "APPROVED" and new_status == "APPROVED":
-            send_order_approved_email(order)
-    
+        # COMPLETED 처리 (service에서 처리)
+        if new_status == Order.STATUS_COMPLETED:
+            try:
+                complete_order(order=order)
+            except ValueError as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 완료 X -> COMPLETED (재고 증가)
-        if previous_status != "COMPLETED" and new_status == "COMPLETED":
-            for item in order.items.all():
-                variant = item.variant
-                if variant:
-                    variant.stock = variant.stock + item.quantity
-                    variant.save()
+            serializer = OrderReadSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
 
-        # COMPLETED -> CANCELLED or APPROVED 변경 (재고 감소)
-        elif previous_status == "COMPLETED" and new_status != "COMPLETED":
-            for item in order.items.all():
-                variant = item.variant
-                if variant:
-                    if variant.stock < item.quantity:
-                        return Response({
-                            "error": "현재 재고가 부족하여 상태 변경이 불가능합니다.",
-                            "item": {
-                                "variant_code": variant.variant_code,
-                                "name": variant.product.name if variant.product else None,
-                                "option": variant.option if variant.option else None,
-                                "current_stock": variant.stock,
-                                "required_quantity": item.quantity,
-                                "remaining_stock_if_changed": variant.stock - item.quantity
-                            }
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    variant.stock -= item.quantity
-                    variant.save()
+        # 일반 상태 변경
+        order.status = new_status
+        order.save(update_fields=["status"])
 
         serializer = OrderReadSerializer(order)
-        # 재고 변경 체크
-        stock_changes = []
-        for item in order.items.all():
-            variant = item.variant
-            if variant:
-                change = item.quantity
-                if previous_status != "COMPLETED" and new_status == "COMPLETED":
-                    before = variant.stock - change
-                elif previous_status == "COMPLETED" and new_status != "COMPLETED":
-                    before = variant.stock + change
-                else:
-                    before = variant.stock
-                stock_changes.append({
-                    "variant_code": variant.variant_code,
-                    "name": variant.product.name if variant.product else None,
-                    "option": variant.option if variant.option else None,
-                    "quantity": change,
-                    "stock_before": before,
-                    "stock_after": variant.stock
-                })
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-        return Response({
-            "order": serializer.data,
-            "stock_changes": stock_changes
-        }, status=status.HTTP_200_OK)
     
 class OrderExportView(APIView):
     permission_classes = [AllowAny]
