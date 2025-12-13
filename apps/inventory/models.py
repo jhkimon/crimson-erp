@@ -3,6 +3,13 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
+def current_year():
+    return timezone.now().year
+
+def current_month():
+    return timezone.now().month
+
+
 ######
 # ProductVariantStatus + InventoryItem + ProductVariant = 엑셀 화면
 
@@ -72,9 +79,6 @@ class ProductVariantStatus(models.Model):
     store_sales = models.IntegerField(default=0)            # 매장판매
     online_sales = models.IntegerField(default=0)           # 쇼핑몰판매
 
-    stock_adjustment = models.IntegerField(default=0)
-    stock_adjustment_reason = models.CharField(max_length=255, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -87,6 +91,8 @@ class InventoryAdjustment(models.Model):
     variant = models.ForeignKey(
         ProductVariant, on_delete=models.CASCADE, related_name="adjustments"
     )
+    year = models.IntegerField(default=current_year)
+    month = models.IntegerField(default=current_month)
     delta = models.IntegerField(help_text="보정 수량: 양수/음수 모두 가능")
     reason = models.CharField(max_length=255, help_text="보정 사유 설명")
     created_by = models.CharField(

@@ -13,8 +13,9 @@ from .views import (
     # Adjustment
     StockUpdateView,
     InventoryAdjustmentListView,
-    # 엑셀대응
-    ProductVariantStatusListView
+    # ProductVariantStatus
+    ProductVariantStatusListView,
+    ProductVariantStatusDetailView
 )
 
 urlpatterns = [
@@ -47,6 +48,11 @@ urlpatterns = [
         "variant-status/",
         ProductVariantStatusListView.as_view(),
         name="variant-status-list",
+    ),
+    path(
+    "variant-status/<int:year>/<int:month>/<str:variant_code>/",
+    ProductVariantStatusDetailView.as_view(),
+    name="variant-status-detail",
     ),
     path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
 ]

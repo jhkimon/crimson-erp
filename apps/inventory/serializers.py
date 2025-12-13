@@ -142,7 +142,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
         total_sales = self.get_total_sales(obj)
         return initial + obj.inbound_quantity - total_sales + obj.stock_adjustment
 
-####### 변형 Serializer: InventoryItem (+ ProductVariant), ProductVariant 쓰기용
+####### 변형 Serializer: InventoryItem (+ ProductVariant)
 
 class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
     variants = serializers.SerializerMethodField()
@@ -157,6 +157,7 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
         ).data
 
 
+#######  ProductVariant 쓰기 & 수정
 class ProductVariantWriteSerializer(serializers.ModelSerializer):
     product_id = serializers.CharField(source="product.product_id", read_only=True)
     name = serializers.CharField(source="product.name", required=False)
@@ -244,3 +245,17 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         if dirty_fields:
             instance.save(update_fields=list(dict.fromkeys(dirty_fields)))
         return instance
+    
+class ProductVariantStatusPatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductVariantStatus
+        fields = [
+            "warehouse_stock_start",
+            "store_stock_start",
+            "inbound_quantity",
+            "store_sales",
+            "online_sales"
+        ]
+
+
+### InventoryAdjustment

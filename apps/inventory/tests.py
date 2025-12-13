@@ -6,7 +6,8 @@ from django.urls import reverse
 from apps.inventory.models import (
     InventoryItem,
     ProductVariant,
-    InventoryAdjustment
+    InventoryAdjustment,
+    ProductVariantStatus
 )
 
 from apps.hr.models import Employee
@@ -170,3 +171,118 @@ class InventoryAdjustmentListTest(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertIn("variant_code", response.data["results"][0])
+
+class ProductVariantStatusPatchTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P00100",
+            name="방패 필통",
+            category="문구",
+        )
+
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P00100000A",
+            option="크림슨",
+            stock=100,
+        )
+
+        self.status_obj = ProductVariantStatus.objects.create(
+            year=2025,
+            month=7,
+            product=self.product,
+            variant=self.variant,
+            warehouse_stock_start=50,
+            store_stock_start=30,
+            inbound_quantity=20,
+            store_sales=10,
+            online_sales=5,
+            stock_adjustment=0,
+        )
+
+    def test_patch_variant_status_single_field(self):
+        """
+        PATCH - 단일 필드 수정
+        """
+        url = reverse(
+            "variant-status-detail",
+            args=[2025, 7, self.variant.variant_code],
+        )
+
+        payload = {
+            "inbound_quantity": 99,
+        }
+
+        response = self.client.patch(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.status_obj.refresh_from_db()
+        self.assertEqual(self.status_obj.inbound_quantity, 99)
+
+    def test_patch_variant_status_multiple_fields(self):
+        """
+        PATCH - 여러 필드 동시 수정
+        """
+        url = reverse(
+            "variant-status-detail",
+            args=[2025, 7, self.variant.variant_code],
+        )
+
+        payload = {
+            "warehouse_stock_start": 60,
+            "store_stock_start": 40,
+            "store_sales": 25,
+            "online_sales": 12,
+        }
+
+        response = self.client.patch(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.status_obj.refresh_from_db()
+        self.assertEqual(self.status_obj.warehouse_stock_start, 60)
+        self.assertEqual(self.status_obj.store_stock_start, 40)
+        self.assertEqual(self.status_obj.store_sales, 25)
+        self.assertEqual(self.status_obj.online_sales, 12)
+
+    def test_patch_variant_status_invalid_field_is_ignored(self):
+        """
+        PATCH - 허용되지 않은 필드는 무시되어야 함
+        """
+        url = reverse(
+            "variant-status-detail",
+            args=[2025, 7, self.variant.variant_code],
+        )
+
+        payload = {
+            "inbound_quantity": 10,
+            "year": 2030,            # ❌ 수정 불가
+            "variant": "HACKED",     # ❌ 수정 불가
+        }
+
+        response = self.client.patch(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.status_obj.refresh_from_db()
+        self.assertEqual(self.status_obj.inbound_quantity, 10)
+        self.assertEqual(self.status_obj.year, 2025)  # 변경 안 됨
+
+    def test_patch_variant_status_not_found(self):
+        """
+        PATCH - 존재하지 않는 variant_status
+        """
+        url = reverse(
+            "variant-status-detail",
+            args=[2025, 7, "NOT_EXIST_CODE"],
+        )
+
+        payload = {
+            "inbound_quantity": 10,
+        }
+
+        response = self.client.patch(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
