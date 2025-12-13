@@ -50,6 +50,7 @@ class ProductOptionListView(APIView):
         operation_summary="상품 옵션 리스트 조회",
         operation_description="상품 드롭다운용으로 product_id와 name만 간단히 반환합니다.",
         responses={200: InventoryItemSummarySerializer(many=True)},
+        tags=["inventory - View"],
     )
     def get(self, request):
         products = InventoryItem.objects.all().only("product_id", "name")
@@ -71,6 +72,7 @@ class InventoryCategoryListView(APIView):
                 example=["문구", "도서", "의류"],
             )
         },
+        tags=["inventory - View"],
     )
     def get(self, request):
         raw = InventoryItem.objects.values_list("category", flat=True)
@@ -239,7 +241,7 @@ class ProductVariantView(APIView):
 
     @swagger_auto_schema(
         operation_summary="상품 상세 목록 조회",
-        tags=["inventory - Variant CRUD"],
+        tags=["inventory - View"],
         manual_parameters=[
             openapi.Parameter(
                 "stock_lt",
@@ -323,7 +325,7 @@ class ProductVariantDetailView(APIView):
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 조회 (방패필통 크림슨)",
-        tags=["inventory - Variant CRUD"],
+        tags=["inventory - View"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
@@ -422,7 +424,7 @@ class ProductVariantExportView(APIView):
 
     @swagger_auto_schema(
         operation_summary="전체 상품 상세 정보 Export (엑셀용)",
-        tags=["inventory - Variant CRUD"],
+        tags=["inventory - View"],
         manual_parameters=[
             openapi.Parameter("stock_lt", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
             openapi.Parameter("stock_gt", openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
@@ -470,7 +472,7 @@ class ProductVariantExcelUploadView(APIView):
 
     @swagger_auto_schema(
         operation_summary="상품 재고 엑셀 업로드",
-        tags=["inventory - Excel"],
+        tags=["inventory"],
         consumes=["multipart/form-data"],
         manual_parameters=[
             openapi.Parameter(
@@ -701,7 +703,8 @@ class ProductVariantStatusListView(generics.ListAPIView):
                 required=True,
                 description="조회 월 (1~12)"
             ),
-        ]
+        ],
+        tags=["inventory - Variant Status (엑셀 행 하나)"],
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
@@ -825,7 +828,7 @@ class ProductVariantStatusDetailView(APIView):
             400: "Invalid field",
             404: "Not Found",
         },
-        tags=["inventory"],
+        tags=["inventory - Variant Status (엑셀 행 하나)"],
     )
 
     def patch(self, request, year: int, month: int, variant_code: str):
@@ -922,7 +925,6 @@ class InventoryAdjustmentView(generics.ListCreateAPIView):
             "1. InventoryAdjustment 생성 (이력 저장)\n"
             "2. 해당 year/month의 ProductVariantStatus 조회 또는 생성\n"
             "3. stock_adjustment에 delta 누적 반영\n\n"
-            "※ delta는 음수/양수 모두 허용됩니다."
         ),
         tags=["inventory - Stock Adjust"],
         request_body=openapi.Schema(
