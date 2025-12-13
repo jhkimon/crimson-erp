@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Sum
 from .models import (
     InventoryItem,
     ProductVariant,
@@ -94,6 +95,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
     # 계산 필드
     initial_stock = serializers.SerializerMethodField()    # 기초재고
     total_sales = serializers.SerializerMethodField()      # 판매물량 합
+    adjustment_total = serializers.SerializerMethodField() # 재고조정 합
     ending_stock = serializers.SerializerMethodField()     # 기말재고
 
     class Meta:
@@ -123,8 +125,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             "store_sales",
             "online_sales",
             "total_sales",
-            "stock_adjustment",
-            "stock_adjustment_reason",
+            "adjustment_total",
             "ending_stock",
         ]
 
@@ -136,11 +137,25 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
         # 판매물량 합 = 매장 판매 + 온라인 판매
         return obj.store_sales + obj.online_sales
 
+    def get_adjustment_total(self, obj):
+        # 재고조정 합
+        return (
+            InventoryAdjustment.objects.filter(
+                variant=obj.variant,
+                year=obj.year,
+                month=obj.month,
+            ).aggregate(total=Sum("delta"))["total"]
+            or 0
+        )
+
     def get_ending_stock(self, obj):
-        # 기말 재고 = 기초재고 + 입고 - 판매합 + 조정
-        initial = self.get_initial_stock(obj)
-        total_sales = self.get_total_sales(obj)
-        return initial + obj.inbound_quantity - total_sales + obj.stock_adjustment
+        # 기초재고 - 판매물량 합 + 재고 조정 합
+        return (
+            self.get_initial_stock(obj)
+            + obj.inbound_quantity
+            - self.get_total_sales(obj)
+            + self.get_adjustment_total(obj)
+        )
 
 ####### 변형 Serializer: InventoryItem (+ ProductVariant)
 
@@ -259,3 +274,35 @@ class ProductVariantStatusPatchSerializer(serializers.ModelSerializer):
 
 
 ### InventoryAdjustment
+class InventoryAdjustmentCreateSerializer(serializers.ModelSerializer):
+    variant_code = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = InventoryAdjustment
+        fields = [
+            "variant_code",
+            "year",
+            "month",
+            "delta",
+            "reason",
+            "created_by",
+        ]
+
+    def create(self, validated_data):
+        variant_code = validated_data.pop("variant_code")
+
+        try:
+            variant = ProductVariant.objects.get(
+                variant_code=variant_code,
+                is_active=True
+            )
+        except ProductVariant.DoesNotExist:
+            raise serializers.ValidationError(
+                {"variant_code": "존재하지 않거나 비활성화된 상품 옵션입니다."}
+            )
+
+
+        return InventoryAdjustment.objects.create(
+            variant=variant,
+            **validated_data
+        )

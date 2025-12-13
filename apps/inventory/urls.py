@@ -11,8 +11,7 @@ from .views import (
     ProductVariantDetailView,
     ProductVariantExportView,
     # Adjustment
-    StockUpdateView,
-    InventoryAdjustmentListView,
+    InventoryAdjustmentView,
     # ProductVariantStatus
     ProductVariantStatusListView,
     ProductVariantStatusDetailView
@@ -25,7 +24,7 @@ urlpatterns = [
     path("variants/export/", ProductVariantExportView.as_view(), name="variant_export"),
     path(
         "adjustments/",
-        InventoryAdjustmentListView.as_view(),
+        InventoryAdjustmentView.as_view(),
         name="inventory-adjustments",
     ),
     path(
@@ -38,11 +37,6 @@ urlpatterns = [
         "variants/<str:variant_code>/",
         ProductVariantDetailView.as_view(),
         name="variant-detail",
-    ),
-    path(
-        "variants/stock/<str:variant_code>/",
-        StockUpdateView.as_view(),
-        name="stock-update",
     ),
     path(
         "variant-status/",

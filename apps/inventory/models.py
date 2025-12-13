@@ -53,7 +53,7 @@ class ProductVariant(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용)
+    adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용, 현재는 안 씀.)
 
 
     class Meta:

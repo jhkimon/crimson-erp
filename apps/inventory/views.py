@@ -35,7 +35,8 @@ from .serializers import (
     ProductVariantWriteSerializer,
     InventoryItemWithVariantsSerializer,
     InventoryAdjustmentSerializer,
-    ProductVariantStatusSerializer
+    ProductVariantStatusSerializer,
+    InventoryAdjustmentCreateSerializer
 )
 
 from .filters import ProductVariantFilter, InventoryAdjustmentFilter, ProductVariantStatusFilter
@@ -110,46 +111,6 @@ class InventoryItemView(APIView):
 
         serializer = InventoryItemWithVariantsSerializer(item)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-
-class InventoryAdjustmentListView(generics.ListAPIView):
-    """
-    GET: 재고 조정 이력 전체 조회 또는 품목별 조회
-    - variant_code로 필터 가능
-    - 최신순 정렬 (기본 10건 페이지네이션)
-    """
-
-    permission_classes = [AllowAny]
-    queryset = InventoryAdjustment.objects.select_related("variant").all()
-    serializer_class = InventoryAdjustmentSerializer
-    filterset_class = InventoryAdjustmentFilter
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["variant__variant_code"]
-    ordering_fields = ["created_at"]
-    ordering = ["-created_at"]  # 최신순 기본 정렬
-
-    @swagger_auto_schema(
-        operation_summary="재고 조정 이력 조회",
-        tags=["inventory - Stock Adjust"],
-        operation_description="variant_code 기준 필터링 및 페이지네이션 지원",
-        manual_parameters=[
-            openapi.Parameter(
-                name="variant_code",
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_STRING,
-                description="조회할 variant_code (예: P00000YC000A)",
-            ),
-            openapi.Parameter(
-                name="page",
-                in_=openapi.IN_QUERY,
-                type=openapi.TYPE_INTEGER,
-                description="페이지 번호 (기본=1)",
-            ),
-        ],
-    )
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
-
 
 # 상품 상세 정보 관련 View
 class ProductVariantView(APIView):
@@ -498,101 +459,6 @@ class ProductVariantExportView(APIView):
         serializer = ProductVariantSerializer(queryset, many=True)
         return Response(serializer.data, status=200)
 
-
-################ 재고 조정
-# 재고 업데이트
-class StockUpdateView(APIView):
-    """
-    PUT: 재고량 수동 업데이트
-    """
-
-    permission_classes = [AllowAny]
-
-    @swagger_auto_schema(
-        operation_summary="재고량 수동 업데이트",
-        tags=["inventory - Stock Adjust"],
-        operation_description="실사 재고량을 입력하여 재고를 업데이트하고 조정 이력을 자동 생성합니다.",
-        manual_parameters=[
-            openapi.Parameter(
-                name="variant_code",
-                in_=openapi.IN_PATH,
-                description="수정할 variant_code (예: P00000YC000A)",
-                type=openapi.TYPE_STRING,
-            )
-        ],
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            required=["actual_stock"],
-            properties={
-                "actual_stock": openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description="실사한 실제 재고량",
-                    example=125,
-                ),
-                "reason": openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description="조정 사유",
-                    example="2025년 2분기 실사",
-                ),
-                "updated_by": openapi.Schema(
-                    type=openapi.TYPE_STRING, description="작업자", example="유시진"
-                ),
-            },
-        ),
-        responses={200: "Stock updated successfully", 404: "Not Found"},
-    )
-    def put(self, request, variant_code: str):
-        try:
-            variant = ProductVariant.objects.get(variant_code=variant_code)
-        except ProductVariant.DoesNotExist:
-            return Response({"error": "Variant not found"}, status=404)
-
-        actual_stock = request.data.get("actual_stock")
-        if actual_stock is None:
-            return Response({"error": "actual_stock is required"}, status=400)
-
-        if actual_stock < 0:
-            return Response({"error": "actual_stock cannot be negative"}, status=400)
-
-        # 현재 총 재고량 (stock + adjustment)
-        current_total_stock = variant.stock + variant.adjustment
-        delta = actual_stock - current_total_stock
-
-        # 조정이 필요한 경우에만 처리
-        if delta != 0:
-            # 조정 이력 생성 (감사 추적용)
-            InventoryAdjustment.objects.create(
-                variant=variant,
-                delta=delta,
-                reason=request.data.get("reason", "재고 실사"),
-                created_by=request.data.get("updated_by", "unknown"),
-            )
-
-            # stock을 실제 재고로 업데이트, adjustment는 0으로 리셋
-            variant.stock = actual_stock
-            variant.adjustment = 0
-            variant.save()
-
-            return Response(
-                {
-                    "message": "재고 업데이트 완료",
-                    "previous_total_stock": current_total_stock,
-                    "new_stock": actual_stock,
-                    "adjustment_delta": delta,
-                    "updated_at": variant.updated_at,
-                },
-                status=200,
-            )
-        else:
-            return Response(
-                {
-                    "message": "조정 불필요 - 재고가 일치합니다",
-                    "current_stock": current_total_stock,
-                },
-                status=200,
-            )
-
-
 class ProductVariantExcelUploadView(APIView):
     """
     POST: 재고 관리 엑셀 업로드
@@ -785,7 +651,6 @@ class ProductVariantExcelUploadView(APIView):
                         "inbound_quantity": inbound,
                         "store_sales": store_sales,
                         "online_sales": online_sales,
-                        "stock_adjustment": 0,
                     },
                 )
 
@@ -1002,3 +867,117 @@ class ProductVariantStatusDetailView(APIView):
 
         serializer = ProductVariantStatusSerializer(status_obj)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+class InventoryAdjustmentView(generics.ListCreateAPIView):
+    """
+    재고 조정 관리 API
+
+    GET  /inventory/adjustments/
+    - 재고 조정 이력 조회
+    - variant_code, year, month 필터 가능
+    - 최신순 정렬
+
+    POST /inventory/adjustments/
+    - 재고 조정 이력 생성
+    - 생성 시 ProductVariantStatus(year, month)에
+      stock_adjustment 누적 반영
+    """
+
+    permission_classes = [AllowAny]
+    queryset = InventoryAdjustment.objects.select_related(
+        "variant", "variant__product"
+    )
+    filterset_class = InventoryAdjustmentFilter
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    ordering = ["-created_at"]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return InventoryAdjustmentCreateSerializer
+        return InventoryAdjustmentSerializer
+
+    # -------------------------
+    # GET: 조정 이력 조회
+    # -------------------------
+    @swagger_auto_schema(
+        operation_summary="재고 조정 이력 조회",
+        operation_description=(
+            "재고 조정 이력을 조회합니다.\n\n"
+            "- variant_code, year, month 기준 필터 가능\n"
+            "- 최신순 정렬"
+        ),
+        tags=["inventory - Stock Adjust"],
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    # -------------------------
+    # POST: 조정 등록
+    # -------------------------
+    @swagger_auto_schema(
+        operation_summary="재고 조정 등록",
+        operation_description=(
+            "재고 조정을 등록합니다.\n\n"
+            "처리 흐름:\n"
+            "1. InventoryAdjustment 생성 (이력 저장)\n"
+            "2. 해당 year/month의 ProductVariantStatus 조회 또는 생성\n"
+            "3. stock_adjustment에 delta 누적 반영\n\n"
+            "※ delta는 음수/양수 모두 허용됩니다."
+        ),
+        tags=["inventory - Stock Adjust"],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["variant_code", "delta", "reason", "created_by"],
+            properties={
+                "variant_code": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    example="P00001-A",
+                    description="조정 대상 variant_code",
+                ),
+                "year": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    example=2025,
+                    description="조정 연도 (미입력 시 현재 연도)",
+                ),
+                "month": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    example=12,
+                    description="조정 월 (미입력 시 현재 월)",
+                ),
+                "delta": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    example=-5,
+                    description="재고 조정 수량 (음수/양수 가능)",
+                ),
+                "reason": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    example="분기 실사 재고 차이",
+                    description="조정 사유",
+                ),
+                "created_by": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    example="김정현",
+                    description="조정 작업자",
+                ),
+            },
+        ),
+        responses={201: InventoryAdjustmentSerializer},
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        adjustment = serializer.save()
+
+        # ProductVariantStatus 반영
+        ProductVariantStatus.objects.get_or_create(
+            year=adjustment.year,
+            month=adjustment.month,
+            variant=adjustment.variant,
+            defaults={
+                "product": adjustment.variant.product,
+            },
+        )
+
+        output_serializer = InventoryAdjustmentSerializer(adjustment)
+
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)

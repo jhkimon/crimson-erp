@@ -1,7 +1,9 @@
 import io
+import pandas as pd
 from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.inventory.models import (
     InventoryItem,
@@ -111,67 +113,6 @@ class ProductVariantDetailTest(APITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(ProductVariant.objects.count(), 0)
 
-
-class StockAdjustmentTest(APITestCase):
-
-    def setUp(self):
-        product = InventoryItem.objects.create(
-            product_id="P00040", name="방패 필통"
-        )
-        self.variant = ProductVariant.objects.create(
-            product=product,
-            variant_code="P00040000A",
-            option="블랙",
-            stock=100
-        )
-
-    def test_stock_update_creates_adjustment(self):
-        url = reverse("stock-update", args=[self.variant.variant_code])
-        payload = {
-            "actual_stock": 90,
-            "reason": "분기 실사",
-            "updated_by": "관리자A"
-        }
-
-        response = self.client.put(url, payload, format="json")
-        self.assertEqual(response.status_code, 200)
-
-        self.variant.refresh_from_db()
-        self.assertEqual(self.variant.stock, 90)
-        self.assertEqual(self.variant.adjustment, 0)
-
-        adjustment = InventoryAdjustment.objects.first()
-        self.assertEqual(adjustment.delta, -10)
-        self.assertEqual(adjustment.created_by, "관리자A")
-
-
-class InventoryAdjustmentListTest(APITestCase):
-
-    def setUp(self):
-        product = InventoryItem.objects.create(
-            product_id="P00050", name="삼방패 티셔츠"
-        )
-        variant = ProductVariant.objects.create(
-            product=product,
-            variant_code="P00050000A",
-            option="L",
-            stock=50
-        )
-        InventoryAdjustment.objects.create(
-            variant=variant,
-            delta=-5,
-            reason="파손",
-            created_by="관리자B"
-        )
-
-    def test_adjustment_list(self):
-        url = reverse("inventory-adjustments")
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data["results"]), 1)
-        self.assertIn("variant_code", response.data["results"][0])
-
 class ProductVariantStatusPatchTest(APITestCase):
 
     def setUp(self):
@@ -197,8 +138,7 @@ class ProductVariantStatusPatchTest(APITestCase):
             store_stock_start=30,
             inbound_quantity=20,
             store_sales=10,
-            online_sales=5,
-            stock_adjustment=0,
+            online_sales=5
         )
 
     def test_patch_variant_status_single_field(self):
@@ -286,3 +226,214 @@ class ProductVariantStatusPatchTest(APITestCase):
         response = self.client.patch(url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class InventoryAdjustmentCreateTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P00900",
+            name="방패 필통",
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P00900000A",
+            option="블랙",
+            stock=100,
+            is_active=True,
+        )
+
+    def test_create_inventory_adjustment(self):
+        """
+        POST /inventory/adjustments/
+        - InventoryAdjustment 생성
+        - ProductVariantStatus 자동 생성
+        """
+        url = reverse("inventory-adjustments")
+
+        payload = {
+            "variant_code": self.variant.variant_code,
+            "year": 2025,
+            "month": 12,
+            "delta": -7,
+            "reason": "실사 재고 차이",
+            "created_by": "관리자A",
+        }
+
+        response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # InventoryAdjustment 생성 확인
+        adjustment = InventoryAdjustment.objects.get()
+        self.assertEqual(adjustment.variant, self.variant)
+        self.assertEqual(adjustment.delta, -7)
+        self.assertEqual(adjustment.reason, "실사 재고 차이")
+        self.assertEqual(adjustment.created_by, "관리자A")
+        self.assertEqual(adjustment.year, 2025)
+        self.assertEqual(adjustment.month, 12)
+
+        # ProductVariantStatus 자동 생성 확인
+        status_obj = ProductVariantStatus.objects.get(
+            year=2025,
+            month=12,
+            variant=self.variant,
+        )
+        self.assertEqual(status_obj.product, self.product)
+
+class InventoryAdjustmentWithExistingStatusTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P00910",
+            name="삼방패 티셔츠",
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P00910000A",
+            option="L",
+            stock=50,
+            is_active=True,
+        )
+
+        self.status = ProductVariantStatus.objects.create(
+            year=2025,
+            month=7,
+            product=self.product,
+            variant=self.variant,
+        )
+
+    def test_adjustment_does_not_create_duplicate_status(self):
+        url = reverse("inventory-adjustments")
+
+        payload = {
+            "variant_code": self.variant.variant_code,
+            "year": 2025,
+            "month": 7,
+            "delta": 5,
+            "reason": "입고 누락 보정",
+            "created_by": "관리자B",
+        }
+
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # ProductVariantStatus는 여전히 1개
+        self.assertEqual(
+            ProductVariantStatus.objects.filter(
+                year=2025,
+                month=7,
+                variant=self.variant,
+            ).count(),
+            1,
+        )
+
+class InventoryAdjustmentInactiveVariantTest(APITestCase):
+
+    def setUp(self):
+        product = InventoryItem.objects.create(
+            product_id="P00920",
+            name="방패 필통",
+        )
+        self.variant = ProductVariant.objects.create(
+            product=product,
+            variant_code="P00920000A",
+            option="화이트",
+            stock=10,
+            is_active=False,  # ❌ 비활성
+        )
+
+    def test_adjustment_with_inactive_variant_fails(self):
+        url = reverse("inventory-adjustments")
+
+        payload = {
+            "variant_code": self.variant.variant_code,
+            "delta": -1,
+            "reason": "테스트",
+            "created_by": "관리자",
+        }
+
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class ProductVariantExcelUploadBasicTest(APITestCase):
+    """
+    엑셀 업로드
+    - 1행 업로드 시
+      - ProductVariant 생성
+      - ProductVariantStatus 생성
+    """
+
+    def _make_excel_file(self):
+        """
+        header=2 기준에 맞는 엑셀 파일 생성
+        """
+        # 실제 데이터 (3번째 줄부터)
+        data = {
+            "상품코드": ["P10000-A"],
+            "오프라인 품목명": ["테스트 상품"],
+            "온라인 품목명": ["테스트 상품 온라인"],
+            "옵션": ["블랙"],
+            "기말 재고": [100],
+            "월초창고 재고": [40],
+            "월초매장 재고": [30],
+            "당월입고물량": [50],
+            "매장 판매물량": [10],
+            "쇼핑몰 판매물량": [10],
+        }
+
+        df = pd.DataFrame(data)
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            # 더미 행 2줄
+            pd.DataFrame([[], []]).to_excel(
+                writer, index=False, header=False
+            )
+            # 실제 데이터
+            df.to_excel(
+                writer, index=False, startrow=2
+            )
+
+        buffer.seek(0)
+        return buffer
+
+    def test_excel_upload_creates_variant_and_status(self):
+        url = reverse("variant-excel-upload")
+
+        excel_file = self._make_excel_file()
+
+        upload_file = SimpleUploadedFile(
+            "inventory.xlsx",
+            excel_file.read(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+        response = self.client.post(
+            url,
+            data={"file": upload_file},
+            format="multipart",
+        )
+
+        # API 성공
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Variant 생성 확인
+        self.assertEqual(ProductVariant.objects.count(), 1)
+        variant = ProductVariant.objects.first()
+        self.assertEqual(variant.variant_code, "P10000-A")
+        self.assertEqual(variant.stock, 100)
+
+        # Product 생성 확인
+        self.assertEqual(InventoryItem.objects.count(), 1)
+        product = InventoryItem.objects.first()
+        self.assertEqual(product.product_id, "P10000")
+
+        # 월별 Status 생성 확인
+        self.assertEqual(ProductVariantStatus.objects.count(), 1)
+        status_obj = ProductVariantStatus.objects.first()
+        self.assertEqual(status_obj.variant, variant)
+        self.assertEqual(status_obj.warehouse_stock_start, 40)
+        self.assertEqual(status_obj.store_stock_start, 30)
