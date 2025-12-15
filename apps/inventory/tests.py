@@ -478,6 +478,88 @@ class ProductVariantCreateNoOptionTest(APITestCase):
         self.assertEqual(variant.option, "")
         self.assertEqual(variant.detail_option, "")
 
+class ProductVariantExportTest(APITestCase):
+    """
+    ProductVariantStatus 기반 엑셀 Export API 테스트
+    """
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P77777",
+            name="테스트 상품",
+            online_name="테스트 상품 온라인",
+            big_category="STORE",
+            middle_category="FASHION",
+            category="의류",
+            description="Export 테스트 상품",
+        )
+
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P77777-WHITE-M",
+            option="화이트",
+            detail_option="M",
+            stock=50,
+            price=10000,
+        )
+
+        self.status = ProductVariantStatus.objects.create(
+            year=2025,
+            month=7,
+            product=self.product,
+            variant=self.variant,
+            warehouse_stock_start=40,
+            store_stock_start=10,
+            inbound_quantity=20,
+            store_sales=15,
+            online_sales=5,
+        )
+
+        # 재고 조정
+        InventoryAdjustment.objects.create(
+            variant=self.variant,
+            year=2025,
+            month=7,
+            delta=-3,
+            reason="분실",
+            created_by="관리자",
+        )
+
+    def test_export_basic_row(self):
+        url = reverse("variant-export")  # ← urls.py 이름 확인
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+        row = response.data[0]
+
+        # 📌 Product 정보
+        self.assertEqual(row["big_category"], "STORE")
+        self.assertEqual(row["middle_category"], "FASHION")
+        self.assertEqual(row["category"], "의류")
+        self.assertEqual(row["description"], "Export 테스트 상품")
+        self.assertEqual(row["online_name"], "테스트 상품 온라인")
+        self.assertEqual(row["offline_name"], "테스트 상품")
+
+        # 📌 Variant 정보
+        self.assertEqual(row["option"], "화이트")
+        self.assertEqual(row["detail_option"], "M")
+        self.assertEqual(row["product_code"], "P77777")
+        self.assertEqual(row["variant_code"], "P77777-WHITE-M")
+
+        # 📌 수량 필드
+        self.assertEqual(row["warehouse_stock_start"], 40)
+        self.assertEqual(row["store_stock_start"], 10)
+        self.assertEqual(row["initial_stock"], 50)      # 40 + 10
+        self.assertEqual(row["inbound_quantity"], 20)
+        self.assertEqual(row["store_sales"], 15)
+        self.assertEqual(row["online_sales"], 5)
+        self.assertEqual(row["total_sales"], 20)         # 15 + 5
+        self.assertEqual(row["adjustment_total"], -3)
+        self.assertEqual(row["ending_stock"], 47)        # 50 + 20 - 20 - 3
+
+
 class VariantCodeUtilTest(APITestCase):
 
     def test_generate_variant_code_cases(self):
