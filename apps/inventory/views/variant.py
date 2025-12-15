@@ -37,53 +37,89 @@ class ProductVariantView(APIView):
     ordering_fields = ["stock", "price"]
 
     @swagger_auto_schema(
-        operation_summary="상품 상세 정보 생성 (방패 필통 크림슨)",
+        operation_summary="상품 상세 정보 생성",
         tags=["inventory - Variant CRUD"],
         operation_description=(
-            "기존 product_id가 있으면 연결하고, 없으면 새로 생성한 뒤 옵션/상세옵션 기준으로 SKU(variant_code) 자동 생성"
+            "상품 상세(SKU) 생성 API\n\n"
+            "- product_id 기준으로 상품(InventoryItem)을 조회/생성\n"
+            "- Product 필드와 Variant 필드를 동시에 입력 가능\n"
+            "- 옵션/상세옵션 기반으로 variant_code(SKU)는 자동 생성됨"
         ),
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             required=["product_id", "name"],
             properties={
+                # ===== Product =====
                 "product_id": openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="상품 식별자",
+                    description="상품 식별자 (Product ID)",
                     example="P00000YC",
                 ),
                 "name": openapi.Schema(
-                    type=openapi.TYPE_STRING, description="상품명", example="방패 필통"
+                    type=openapi.TYPE_STRING,
+                    description="오프라인 상품명",
+                    example="방패 필통",
+                ),
+                "online_name": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="온라인 상품명",
+                    example="방패 필통 온라인",
                 ),
                 "category": openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="상품 카테고리",
+                    description="카테고리",
                     example="문구",
                 ),
+                "big_category": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="대분류",
+                    example="STORE",
+                ),
+                "middle_category": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="중분류",
+                    example="FASHION",
+                ),
+
+                # ===== Variant =====
                 "option": openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="옵션",
-                    example="색상 : 크림슨",
+                    description="옵션 (예: 색상)",
+                    example="화이트",
+                ),
+                "detail_option": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="상세 옵션 (예: 사이즈)",
+                    example="M",
                 ),
                 "stock": openapi.Schema(
-                    type=openapi.TYPE_INTEGER, description="초기 재고", example=100
+                    type=openapi.TYPE_INTEGER,
+                    description="초기 재고 (기말 재고)",
+                    example=100,
                 ),
                 "price": openapi.Schema(
-                    type=openapi.TYPE_INTEGER, description="판매가", example=5900
+                    type=openapi.TYPE_INTEGER,
+                    description="판매가",
+                    example=5900,
                 ),
                 "min_stock": openapi.Schema(
-                    type=openapi.TYPE_INTEGER, description="최소 재고", example=5
+                    type=openapi.TYPE_INTEGER,
+                    description="최소 재고 알림 기준",
+                    example=5,
                 ),
                 "description": openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description="설명",
-                    example="튼튼한 크림슨 컬러 방패 필통",
+                    description="상품 설명",
+                    example="튼튼한 방패 필통",
                 ),
                 "memo": openapi.Schema(
-                    type=openapi.TYPE_STRING, description="메모", example="23FW 신상품"
+                    type=openapi.TYPE_STRING,
+                    description="메모",
+                    example="23FW 신상품",
                 ),
                 "channels": openapi.Schema(
                     type=openapi.TYPE_ARRAY,
-                    description="판매 채널 태그",
+                    description="판매 채널",
                     items=openapi.Items(type=openapi.TYPE_STRING),
                     example=["online", "offline"],
                 ),
@@ -91,17 +127,24 @@ class ProductVariantView(APIView):
             example={
                 "product_id": "P00000YC",
                 "name": "방패 필통",
+                "online_name": "방패 필통 온라인",
+                "big_category": "STORE",
+                "middle_category": "FASHION",
                 "category": "문구",
-                "option": "색상 : 크림슨",
+                "option": "화이트",
+                "detail_option": "M",
                 "stock": 100,
                 "price": 5900,
                 "min_stock": 5,
-                "description": "튼튼한 크림슨 컬러 방패 필통",
+                "description": "튼튼한 방패 필통",
                 "memo": "23FW 신상품",
                 "channels": ["online", "offline"],
             },
         ),
-        responses={201: ProductVariantSerializer, 400: "Bad Request"},
+        responses={
+            201: ProductVariantSerializer,
+            400: "Bad Request",
+        },
     )
     def post(self, request):
         product_id = request.data.get("product_id")

@@ -177,16 +177,50 @@ class InventoryItemWithVariantsSerializer(serializers.ModelSerializer):
 
 #######  ProductVariant 쓰기 & 수정
 class ProductVariantWriteSerializer(serializers.ModelSerializer):
-    product_id = serializers.CharField(source="product.product_id", read_only=True)
-    name = serializers.CharField(source="product.name", required=False)
-    option = serializers.CharField(required=False)
-    detail_option = serializers.CharField(required=False)
+    """
+    ProductVariant 생성/수정용 Serializer
+
+    - Product 관련 필드는 source="product.xxx" 로 전달
+    - Variant 생성 시 variant_code는 자동 생성
+    """
+
+    # ===== Product fields =====
+    product_id = serializers.CharField(
+        source="product.product_id",
+        read_only=True,
+    )
+    name = serializers.CharField(
+        source="product.name",
+        required=False,
+    )
+    online_name = serializers.CharField(
+        source="product.online_name",
+        required=False,
+        allow_blank=True,
+    )
+    big_category = serializers.CharField(
+        source="product.big_category",
+        required=False,
+        allow_blank=True,
+    )
+    middle_category = serializers.CharField(
+        source="product.middle_category",
+        required=False,
+        allow_blank=True,
+    )
     category = serializers.CharField(
-        write_only=True, required=False
+        write_only=True,
+        required=False,
     )
     category_name = serializers.CharField(
-        source="product.category", read_only=True
+        source="product.category",
+        read_only=True,
     )
+
+    # ===== Variant fields =====
+    option = serializers.CharField(required=False)
+    detail_option = serializers.CharField(required=False, allow_blank=True)
+
     channels = serializers.ListField(
         child=serializers.ChoiceField(choices=["online", "offline"]),
         required=False,
@@ -208,31 +242,45 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
             "description",
             "memo",
             "name",
+            "online_name",
+            "big_category",
+            "middle_category",
             "channels",
         ]
 
+    # ==========================
+    # variant_code는 클라이언트 입력 금지
+    # ==========================
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get("request")
 
-        # POST나 PATCH 요청 시 variant_code 제거
-        if request and request.method in ["POST", "PATCH"]:
+        if request and request.method in ("POST", "PATCH"):
             fields.pop("variant_code", None)
+
         return fields
 
+    # ==========================
+    # CREATE
+    # ==========================
     def create(self, validated_data):
-        product = self.context.get("product")
-        validated_data.pop("product", None)
+        product = self.context["product"]
 
-        # category 처리
+        # 🔹 Product 필드 처리
+        product_data = validated_data.pop("product", {})
         category_value = validated_data.pop("category", None)
+
+        for attr, value in product_data.items():
+            setattr(product, attr, value)
+
         if category_value:
             product.category = category_value
-            product.save(update_fields=["category"])
 
+        product.save()
+
+        # 🔹 Variant 필드
         channels = validated_data.pop("channels", None)
 
-        # 🔥 핵심: variant_code 생성
         option = validated_data.get("option", "")
         detail_option = validated_data.get("detail_option", "")
 
@@ -244,7 +292,7 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
 
         variant = ProductVariant.objects.create(
             product=product,
-            **validated_data
+            **validated_data,
         )
 
         if channels is not None:
@@ -253,15 +301,27 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
 
         return variant
 
+    # ==========================
+    # UPDATE
+    # ==========================
     def update(self, instance, validated_data):
-        # 카테고리 업데이트
+        product = instance.product
+
+        # 🔹 Product 필드
+        product_data = validated_data.pop("product", {})
         category_value = validated_data.pop("category", None)
+
+        for attr, value in product_data.items():
+            setattr(product, attr, value)
+
         if category_value:
-            instance.product.category = category_value
-            instance.product.save()
+            product.category = category_value
 
+        if product_data or category_value:
+            product.save()
+
+        # 🔹 Variant 필드
         channels = validated_data.pop("channels", None)
-
         dirty_fields = []
 
         for attr, value in validated_data.items():
@@ -274,7 +334,9 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
 
         if dirty_fields:
             instance.save(update_fields=list(dict.fromkeys(dirty_fields)))
+
         return instance
+
     
 class ProductVariantStatusPatchSerializer(serializers.ModelSerializer):
     class Meta:

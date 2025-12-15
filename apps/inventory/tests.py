@@ -36,20 +36,37 @@ class ProductVariantCreateTest(APITestCase):
             "product_id": "P00010",
             "name": "방패 필통",
             "category": "문구",
+            "big_category": "STORE",
+            "middle_category": "FASHION",
+            "online_name": "방패 필통 온라인",
             "option": "색상: 크림슨",
+            "detail_option": "M",
             "stock": 100,
             "price": 5900,
             "min_stock": 5,
             "channels": ["online", "offline"]
         }
 
+
         response = self.client.post(url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        variant = ProductVariant.objects.first()
+        variant = ProductVariant.objects.get()
+
+        # Product
         self.assertEqual(variant.product.product_id, "P00010")
+        self.assertEqual(variant.product.name, "방패 필통")
+        self.assertEqual(variant.product.online_name, "방패 필통 온라인")
+        self.assertEqual(variant.product.big_category, "STORE")
+        self.assertEqual(variant.product.middle_category, "FASHION")
+        self.assertEqual(variant.product.category, "문구")
+
+        # Variant
+        self.assertEqual(variant.option, "색상: 크림슨")
+        self.assertEqual(variant.detail_option, "M")
         self.assertEqual(variant.stock, 100)
-        self.assertTrue(variant.variant_code.startswith("P00010-"))
+        self.assertEqual(variant.variant_code, "P00010-색상:크림슨-M".upper())
+
 
 
 class ProductVariantListTest(APITestCase):
@@ -455,9 +472,11 @@ class ProductVariantCreateNoOptionTest(APITestCase):
         response = self.client.post(url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        variant = ProductVariant.objects.first()
+        variant = ProductVariant.objects.get()
+
         self.assertEqual(variant.variant_code, "P00011-DEFAULT")
         self.assertEqual(variant.option, "")
+        self.assertEqual(variant.detail_option, "")
 
 class VariantCodeUtilTest(APITestCase):
 
