@@ -37,7 +37,11 @@ class ProductVariant(models.Model):
         InventoryItem, on_delete=models.CASCADE, related_name="variants"
     )  
     option = models.CharField(max_length=255) # 옵션
-    detail_option = models.CharField(max_length=255, blank=True, null=True)  # 상세옵션 (주로 사이즈)
+    detail_option = models.CharField(
+        max_length=255,
+        blank=True,
+        default=""
+    )  # 상세옵션 (주로 사이즈)
     variant_code = models.CharField(max_length=50, unique=True)
 
     stock = models.IntegerField(default=0) # 지금 이 순간의 재고 (= 기말재고)
@@ -57,6 +61,7 @@ class ProductVariant(models.Model):
 
 
     class Meta:
+        unique_together = ("product", "option", "detail_option")
         db_table = "product_variants"
         ordering = ["variant_code"]
 

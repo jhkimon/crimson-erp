@@ -37,7 +37,7 @@ EMPLOYEES = [
     },
     {
         "username": "manager1",
-        "name": "넥스트",
+        "name": "김강민",
         "role": "MANAGER",
         "is_superuser": False,
         "is_staff": True,
@@ -60,7 +60,7 @@ EMPLOYEES = [
         "is_superuser": False,
         "is_staff": False,
         "allowed_tabs": ["INVENTORY"],
-        "gender": "FEMALE",
+        "gender": "MALE",
     },
 ]
 

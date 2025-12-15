@@ -1,5 +1,8 @@
 from rest_framework import serializers
 from django.db.models import Sum
+
+from apps.inventory.utils.variant_code import generate_variant_code
+
 from .models import (
     InventoryItem,
     ProductVariant,
@@ -225,12 +228,24 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         category_value = validated_data.pop("category", None)
         if category_value:
             product.category = category_value
-            product.save()
+            product.save(update_fields=["category"])
 
         channels = validated_data.pop("channels", None)
 
-        # variant 생성
-        variant = ProductVariant.objects.create(product=product, **validated_data)
+        # 🔥 핵심: variant_code 생성
+        option = validated_data.get("option", "")
+        detail_option = validated_data.get("detail_option", "")
+
+        validated_data["variant_code"] = generate_variant_code(
+            product.product_id,
+            option,
+            detail_option,
+        )
+
+        variant = ProductVariant.objects.create(
+            product=product,
+            **validated_data
+        )
 
         if channels is not None:
             variant.channels = channels

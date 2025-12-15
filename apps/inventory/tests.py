@@ -11,9 +11,7 @@ from apps.inventory.models import (
     InventoryAdjustment,
     ProductVariantStatus
 )
-
-from apps.hr.models import Employee
-from .serializers import InventoryAdjustmentSerializer
+from apps.inventory.utils.variant_code import generate_variant_code
 
 class InventoryQuickViewTest(APITestCase):
 
@@ -51,7 +49,7 @@ class ProductVariantCreateTest(APITestCase):
         variant = ProductVariant.objects.first()
         self.assertEqual(variant.product.product_id, "P00010")
         self.assertEqual(variant.stock, 100)
-        self.assertIn("variant_code", response.data)
+        self.assertTrue(variant.variant_code.startswith("P00010-"))
 
 
 class ProductVariantListTest(APITestCase):
@@ -380,7 +378,12 @@ class ProductVariantExcelUploadBasicTest(APITestCase):
             "당월입고물량": [50],
             "매장 판매물량": [10],
             "쇼핑몰 판매물량": [10],
+            "카테고리": ["문구"],
+            "대분류": ["STORE"],
+            "중분류": ["FASHION"],
+            "설명": ["엑셀 업로드 테스트"],
         }
+
 
         df = pd.DataFrame(data)
 
@@ -437,3 +440,37 @@ class ProductVariantExcelUploadBasicTest(APITestCase):
         self.assertEqual(status_obj.variant, variant)
         self.assertEqual(status_obj.warehouse_stock_start, 40)
         self.assertEqual(status_obj.store_stock_start, 30)
+
+class ProductVariantCreateNoOptionTest(APITestCase):
+
+    def test_create_variant_without_option(self):
+        url = reverse("variant")
+        payload = {
+            "product_id": "P00011",
+            "name": "옵션 없는 상품",
+            "stock": 10,
+            "price": 1000,
+        }
+
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        variant = ProductVariant.objects.first()
+        self.assertEqual(variant.variant_code, "P00011-DEFAULT")
+        self.assertEqual(variant.option, "")
+
+class VariantCodeUtilTest(APITestCase):
+
+    def test_generate_variant_code_cases(self):
+        self.assertEqual(
+            generate_variant_code("P001", "", ""),
+            "P001-DEFAULT"
+        )
+        self.assertEqual(
+            generate_variant_code("P001", "화이트", ""),
+            "P001-화이트".upper()
+        )
+        self.assertEqual(
+            generate_variant_code("P001", "화이트", "M"),
+            "P001-화이트-M".upper()
+        )
