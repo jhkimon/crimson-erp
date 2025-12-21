@@ -556,7 +556,13 @@ class ProductVariantExportTest(APITestCase):
         self.assertEqual(row["store_sales"], 15)
         self.assertEqual(row["online_sales"], 5)
         self.assertEqual(row["total_sales"], 20)         # 15 + 5
-        self.assertEqual(row["adjustment_total"], -3)
+        self.assertEqual(row["adjustment_quantity"], -3)
+        self.assertEqual(
+            row["adjustment_status"],
+            [
+                {"created_by": "관리자", "quantity": -3}
+            ]
+        )
         self.assertEqual(row["ending_stock"], 47)        # 50 + 20 - 20 - 3
 
 

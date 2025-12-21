@@ -98,7 +98,8 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
     # 계산 필드
     initial_stock = serializers.SerializerMethodField()    # 기초재고
     total_sales = serializers.SerializerMethodField()      # 판매물량 합
-    adjustment_total = serializers.SerializerMethodField() # 재고조정 합
+    adjustment_quantity = serializers.SerializerMethodField()
+    adjustment_status = serializers.SerializerMethodField() 
     ending_stock = serializers.SerializerMethodField()     # 기말재고
 
     class Meta:
@@ -128,7 +129,8 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             "store_sales",
             "online_sales",
             "total_sales",
-            "adjustment_total",
+            "adjustment_quantity",
+            "adjustment_status",
             "ending_stock",
         ]
 
@@ -140,7 +142,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
         # 판매물량 합 = 매장 판매 + 온라인 판매
         return obj.store_sales + obj.online_sales
 
-    def get_adjustment_total(self, obj):
+    def get_adjustment_quantity(self, obj):
         # 재고조정 합
         return (
             InventoryAdjustment.objects.filter(
@@ -150,6 +152,25 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             ).aggregate(total=Sum("delta"))["total"]
             or 0
         )
+    
+    def get_adjustment_status(self, obj):
+        """
+        adjustment_status = [{책임자, quantity}, ...]
+        """
+        adjustments = InventoryAdjustment.objects.filter(
+            variant=obj.variant,
+            year=obj.year,
+            month=obj.month,
+        ).values("created_by", "delta")
+
+        return [
+            {
+                "created_by": adj["created_by"],
+                "quantity": adj["delta"],
+            }
+            for adj in adjustments
+        ]
+
 
     def get_ending_stock(self, obj):
         # 기초재고 - 판매물량 합 + 재고 조정 합
@@ -157,7 +178,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             self.get_initial_stock(obj)
             + obj.inbound_quantity
             - self.get_total_sales(obj)
-            + self.get_adjustment_total(obj)
+            + self.get_adjustment_quantity(obj)
         )
 
 ####### 변형 Serializer: InventoryItem (+ ProductVariant)

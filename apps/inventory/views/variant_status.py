@@ -98,8 +98,6 @@ class ProductVariantStatusDetailView(APIView):
     - inbound_quantity
     - store_sales
     - online_sales
-    - stock_adjustment
-    - stock_adjustment_reason
     """
     
 
