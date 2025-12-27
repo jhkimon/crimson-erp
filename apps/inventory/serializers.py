@@ -382,11 +382,13 @@ class InventoryAdjustmentCreateSerializer(serializers.ModelSerializer):
             "year",
             "month",
             "delta",
-            "reason",
-            "created_by",
+            "reason"
         ]
 
     def create(self, validated_data):
+        request = self.context["request"]
+        user = request.user
+
         variant_code = validated_data.pop("variant_code")
 
         try:
@@ -399,8 +401,14 @@ class InventoryAdjustmentCreateSerializer(serializers.ModelSerializer):
                 {"variant_code": "존재하지 않거나 비활성화된 상품 옵션입니다."}
             )
 
+        created_by = (
+            user.get_full_name()
+            if user.get_full_name()
+            else user.username
+        )
 
         return InventoryAdjustment.objects.create(
             variant=variant,
+            created_by=created_by,
             **validated_data
         )

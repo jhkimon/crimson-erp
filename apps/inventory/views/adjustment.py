@@ -106,18 +106,16 @@ class InventoryAdjustmentView(generics.ListCreateAPIView):
                     type=openapi.TYPE_STRING,
                     example="분기 실사 재고 차이",
                     description="조정 사유",
-                ),
-                "created_by": openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    example="김정현",
-                    description="조정 작업자",
-                ),
+                )
             },
         ),
         responses={201: InventoryAdjustmentSerializer},
     )
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(
+            data=request.data,
+            context={"request": request} 
+        )
         serializer.is_valid(raise_exception=True)
         adjustment = serializer.save()
 
