@@ -92,11 +92,6 @@ class ProductVariantView(APIView):
                     description="상세 옵션 (예: 사이즈)",
                     example="M",
                 ),
-                "stock": openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description="초기 재고 (기말 재고)",
-                    example=100,
-                ),
                 "price": openapi.Schema(
                     type=openapi.TYPE_INTEGER,
                     description="판매가",
@@ -133,7 +128,6 @@ class ProductVariantView(APIView):
                 "category": "문구",
                 "option": "화이트",
                 "detail_option": "M",
-                "stock": 100,
                 "price": 5900,
                 "min_stock": 5,
                 "description": "튼튼한 방패 필통",
@@ -183,30 +177,6 @@ class ProductVariantView(APIView):
         tags=["inventory - View"],
         manual_parameters=[
             openapi.Parameter(
-                "stock_lt",
-                openapi.IN_QUERY,
-                description="재고 수량 미만",
-                type=openapi.TYPE_INTEGER,
-            ),
-            openapi.Parameter(
-                "stock_gt",
-                openapi.IN_QUERY,
-                description="재고 수량 초과",
-                type=openapi.TYPE_INTEGER,
-            ),
-            openapi.Parameter(
-                "sales_min",
-                openapi.IN_QUERY,
-                description="최소 매출",
-                type=openapi.TYPE_INTEGER,
-            ),
-            openapi.Parameter(
-                "sales_max",
-                openapi.IN_QUERY,
-                description="최대 매출",
-                type=openapi.TYPE_INTEGER,
-            ),
-            openapi.Parameter(
                 "page",
                 openapi.IN_QUERY,
                 description="페이지 번호 (default = 1)",
@@ -216,43 +186,55 @@ class ProductVariantView(APIView):
                 "ordering",
                 openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
-                description="정렬 필드 (-price, stock 등)",
+                description="정렬 필드",
             ),
             openapi.Parameter(
                 "product_name",
-                in_=openapi.IN_QUERY,
+                openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
                 description="상품명 검색 (부분일치)",
             ),
             openapi.Parameter(
-                "category",
-                in_=openapi.IN_QUERY,
+                "big_category",
+                openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
-                description="상품 카테고리 (부분일치)",
+                description="대분류",
             ),
             openapi.Parameter(
-                "channel",
-                in_=openapi.IN_QUERY,
+                "middle_category",
+                openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
-                description="채널 필터 (online/offline)",
+                description="중분류",
+            ),
+            openapi.Parameter(
+                "category",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="소분류",
             ),
         ],
         responses={200: ProductVariantSerializer(many=True)},
     )
     def get(self, request):
-        queryset = ProductVariant.objects.select_related("product").all()
+        queryset = ProductVariant.objects.select_related("product")
 
-        # filtering
+        # 🔹 filtering (django-filter)
         for backend in list(self.filter_backends):
             queryset = backend().filter_queryset(request, queryset, self)
 
-        # pagination (고정 page_size = 10)
+        # 🔹 pagination
         paginator = PageNumberPagination()
         paginator.page_size = 10
         page = paginator.paginate_queryset(queryset, request, view=self)
 
-        serializer = ProductVariantSerializer(page, many=True)
+        # 🔹 serializer (context 전달)
+        serializer = ProductVariantSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        )
         return paginator.get_paginated_response(serializer.data)
+
 
 
 class ProductVariantDetailView(APIView):

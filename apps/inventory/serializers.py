@@ -20,7 +20,7 @@ class InventoryItemSummarySerializer(serializers.ModelSerializer):
 class ProductVariantSerializer(serializers.ModelSerializer):
 
     product_id = serializers.CharField(source="product.product_id", read_only=True)
-    offline_name = serializers.CharField(source="product.name", read_only=True)
+    name = serializers.CharField(source="product.name", read_only=True)
     online_name = serializers.CharField(source="product.online_name", read_only=True)
 
     big_category = serializers.CharField(source="product.big_category", read_only=True)
@@ -35,7 +35,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         model = ProductVariant
         fields = [
             "product_id",  # product_id
-            "offline_name",
+            "name",
             "online_name",
             "big_category",
             "middle_category",
@@ -284,7 +284,6 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True,
     )
-
     class Meta:
         model = ProductVariant
         fields = [
@@ -294,7 +293,6 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
             "category_name",
             "option",
             "detail_option",
-            "stock",
             "price",
             "min_stock",
             "description",
@@ -303,7 +301,7 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
             "online_name",
             "big_category",
             "middle_category",
-            "channels",
+            "channels"
         ]
 
     # ==========================
@@ -323,6 +321,7 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
     # ==========================
     def create(self, validated_data):
         product = self.context["product"]
+        today = timezone.now()
 
         # 🔹 Product 필드 처리
         product_data = validated_data.pop("product", {})
@@ -356,6 +355,20 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         if channels is not None:
             variant.channels = channels
             variant.save(update_fields=["channels"])
+        
+        ProductVariantStatus.objects.get_or_create(
+            variant=variant,
+            year=today.year,
+            month=today.month,
+            defaults={
+                "product": product,
+                "warehouse_stock_start": 0,
+                "store_stock_start": 0,
+                "inbound_quantity": 0,
+                "store_sales": 0,
+                "online_sales": 0,
+            },
+        )
 
         return variant
 
