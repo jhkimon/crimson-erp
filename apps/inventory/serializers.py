@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db.models import Sum
+from django.utils import timezone
 
 from apps.inventory.utils.variant_code import generate_variant_code
 
@@ -27,7 +28,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     category = serializers.CharField(source="product.category", read_only=True)
     description = serializers.CharField(source="product.description", read_only=True)
 
-    stock = serializers.IntegerField(read_only=True)
+    stock = serializers.SerializerMethodField()
     channels = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
@@ -41,7 +42,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "category",  # 상품 카테고리
             "variant_code",  # variant_code
             "option",  # 옵션
-            "stock",  # 재고량
+            "stock",
             "price",  # 가격
             "min_stock",  # 최소재고
             "description",  # 상품설명
@@ -53,6 +54,42 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         fields = super().get_fields()
         request = self.context.get("request")
         return fields
+
+
+    def get_stock(self, obj):
+        today = timezone.now()
+        year = today.year
+        month = today.month
+
+        try:
+            status = ProductVariantStatus.objects.get(
+                variant=obj,
+                year=year,
+                month=month,
+            )
+        except ProductVariantStatus.DoesNotExist:
+            return 0
+
+        initial_stock = (
+            status.warehouse_stock_start + status.store_stock_start
+        )
+        total_sales = status.store_sales + status.online_sales
+
+        adjustment_quantity = (
+            InventoryAdjustment.objects.filter(
+                variant=obj,
+                year=year,
+                month=month,
+            ).aggregate(total=Sum("delta"))["total"]
+            or 0
+        )
+
+        return (
+            initial_stock
+            + status.inbound_quantity
+            - total_sales
+            + adjustment_quantity
+        )
 
 class InventoryAdjustmentSerializer(serializers.ModelSerializer):
     variant_code = serializers.CharField(source="variant.variant_code", read_only=True)
