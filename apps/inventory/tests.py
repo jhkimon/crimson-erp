@@ -5,6 +5,7 @@ from rest_framework import status
 from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 
+
 from apps.inventory.models import (
     InventoryItem,
     ProductVariant,
@@ -12,12 +13,35 @@ from apps.inventory.models import (
     ProductVariantStatus
 )
 from apps.inventory.utils.variant_code import generate_variant_code
+from django.contrib.auth import get_user_model
 
+User = get_user_model()
 class InventoryQuickViewTest(APITestCase):
 
     def setUp(self):
-        InventoryItem.objects.create(product_id="P00001", name="방패 필통")
-        InventoryItem.objects.create(product_id="P00002", name="삼방패 티셔츠")
+        product1 = InventoryItem.objects.create(
+            product_id="P00001",
+            name="방패 필통"
+        )
+        product2 = InventoryItem.objects.create(
+            product_id="P00002",
+            name="삼방패 티셔츠"
+        )
+
+        ProductVariant.objects.create(
+            product=product1,
+            variant_code="P00001-A",
+            option="화이트",
+            detail_option="L",
+            is_active=True,
+        )
+        ProductVariant.objects.create(
+            product=product2,
+            variant_code="P00002-A",
+            option="블랙",
+            detail_option="M",
+            is_active=True,
+        )
 
     def test_product_option_list(self):
         url = reverse("inventory_options")
@@ -25,8 +49,16 @@ class InventoryQuickViewTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
-        self.assertIn("product_id", response.data[0])
-        self.assertIn("name", response.data[0])
+
+        row = response.data[0]
+
+        self.assertIn("id", row)
+        self.assertIn("variant_code", row)
+        self.assertIn("name", row)
+
+        # 🔑 name 포맷 검증 (중요)
+        self.assertIn("(", row["name"])
+        self.assertIn(")", row["name"])
 
 class ProductVariantCreateTest(APITestCase):
 
@@ -41,7 +73,6 @@ class ProductVariantCreateTest(APITestCase):
             "online_name": "방패 필통 온라인",
             "option": "색상: 크림슨",
             "detail_option": "M",
-            "stock": 100,
             "price": 5900,
             "min_stock": 5,
             "channels": ["online", "offline"]
@@ -64,7 +95,6 @@ class ProductVariantCreateTest(APITestCase):
         # Variant
         self.assertEqual(variant.option, "색상: 크림슨")
         self.assertEqual(variant.detail_option, "M")
-        self.assertEqual(variant.stock, 100)
         self.assertEqual(variant.variant_code, "P00010-색상:크림슨-M".upper())
 
 
@@ -126,7 +156,8 @@ class ProductVariantDetailTest(APITestCase):
         response = self.client.delete(url)
 
         self.assertEqual(response.status_code, 204)
-        self.assertEqual(ProductVariant.objects.count(), 0)
+        self.variant.refresh_from_db()
+        self.assertFalse(self.variant.is_active)
 
 class ProductVariantStatusPatchTest(APITestCase):
 
@@ -244,8 +275,13 @@ class ProductVariantStatusPatchTest(APITestCase):
 
 
 class InventoryAdjustmentCreateTest(APITestCase):
-
     def setUp(self):
+        self.user = User.objects.create_user(
+            username="tester",
+            password="pass1234",
+            first_name="테스터"
+        )
+        self.client.force_authenticate(user=self.user)
         self.product = InventoryItem.objects.create(
             product_id="P00900",
             name="방패 필통",
@@ -272,7 +308,6 @@ class InventoryAdjustmentCreateTest(APITestCase):
             "month": 12,
             "delta": -7,
             "reason": "실사 재고 차이",
-            "created_by": "관리자A",
         }
 
         response = self.client.post(url, payload, format="json")
@@ -284,8 +319,8 @@ class InventoryAdjustmentCreateTest(APITestCase):
         self.assertEqual(adjustment.variant, self.variant)
         self.assertEqual(adjustment.delta, -7)
         self.assertEqual(adjustment.reason, "실사 재고 차이")
-        self.assertEqual(adjustment.created_by, "관리자A")
         self.assertEqual(adjustment.year, 2025)
+        self.assertEqual(adjustment.created_by, "테스터")
         self.assertEqual(adjustment.month, 12)
 
         # ProductVariantStatus 자동 생성 확인
@@ -299,6 +334,12 @@ class InventoryAdjustmentCreateTest(APITestCase):
 class InventoryAdjustmentWithExistingStatusTest(APITestCase):
 
     def setUp(self):
+        self.user = User.objects.create_user(
+            username="tester",
+            password="pass1234",
+            first_name="테스터"
+        )
+        self.client.force_authenticate(user=self.user)
         self.product = InventoryItem.objects.create(
             product_id="P00910",
             name="삼방패 티셔츠",
@@ -326,8 +367,7 @@ class InventoryAdjustmentWithExistingStatusTest(APITestCase):
             "year": 2025,
             "month": 7,
             "delta": 5,
-            "reason": "입고 누락 보정",
-            "created_by": "관리자B",
+            "reason": "입고 누락 보정"
         }
 
         response = self.client.post(url, payload, format="json")
@@ -346,6 +386,13 @@ class InventoryAdjustmentWithExistingStatusTest(APITestCase):
 class InventoryAdjustmentInactiveVariantTest(APITestCase):
 
     def setUp(self):
+
+        self.user = User.objects.create_user(
+            username="tester",
+            password="pass1234",
+            first_name="테스터"
+        )
+
         product = InventoryItem.objects.create(
             product_id="P00920",
             name="방패 필통",
@@ -444,7 +491,6 @@ class ProductVariantExcelUploadBasicTest(APITestCase):
         self.assertEqual(ProductVariant.objects.count(), 1)
         variant = ProductVariant.objects.first()
         self.assertEqual(variant.variant_code, "P10000-A")
-        self.assertEqual(variant.stock, 100)
 
         # Product 생성 확인
         self.assertEqual(InventoryItem.objects.count(), 1)
@@ -465,7 +511,6 @@ class ProductVariantCreateNoOptionTest(APITestCase):
         payload = {
             "product_id": "P00011",
             "name": "옵션 없는 상품",
-            "stock": 10,
             "price": 1000,
         }
 

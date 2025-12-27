@@ -14,7 +14,8 @@ from ..serializers import (
 )
 
 from ..models import (
-    InventoryItem
+    InventoryItem,
+    ProductVariant
 )
 
 
@@ -24,15 +25,30 @@ class ProductOptionListView(APIView):
 
     @swagger_auto_schema(
         operation_summary="상품 옵션 리스트 조회",
-        operation_description="상품 드롭다운용으로 product_id와 name만 간단히 반환합니다.",
+        operation_description=(
+            "드롭다운용 상품 옵션 리스트를 반환합니다.\n"
+            "표시명: 상품명 (option, detail_option)"
+        ),
         responses={200: InventoryItemSummarySerializer(many=True)},
         tags=["inventory - View"],
     )
     def get(self, request):
-        products = InventoryItem.objects.all().only("product_id", "name")
-        serializer = InventoryItemSummarySerializer(products, many=True)
-        return Response(serializer.data)
+        variants = (
+            ProductVariant.objects
+            .filter(is_active=True)
+            .select_related("product")
+            .only(
+                "id",
+                "variant_code",
+                "option",
+                "detail_option",
+                "product__name",
+            )
+            .order_by("product__name", "variant_code")
+        )
 
+        serializer = InventoryItemSummarySerializer(variants, many=True)
+        return Response(serializer.data)
 
 class InventoryCategoryListView(APIView):
     permission_classes = [AllowAny]

@@ -13,9 +13,24 @@ from .models import (
 
 ####### Base Serializer: InventoryItem, ProductVariant, InventoryAdjustment
 class InventoryItemSummarySerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+
     class Meta:
-        model = InventoryItem
-        fields = ["id", "product_id", "name"]
+        model = ProductVariant
+        fields = [
+            "id",
+            "variant_code",
+            "name",
+        ]
+
+    def get_name(self, obj):
+        product_name = obj.product.name
+        option = obj.option
+        detail_option = obj.detail_option
+
+        if detail_option:
+            return f"{product_name} ({option}, {detail_option})"
+        return f"{product_name} ({option})"
 
 class ProductVariantSerializer(serializers.ModelSerializer):
 

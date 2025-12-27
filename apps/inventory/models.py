@@ -44,7 +44,6 @@ class ProductVariant(models.Model):
     )  # 상세옵션 (주로 사이즈)
     variant_code = models.CharField(max_length=50, unique=True)
 
-    stock = models.IntegerField(default=0) # 지금 이 순간의 재고 (= 기말재고)
     min_stock = models.PositiveIntegerField(default=0) # 재고 알림용
 
     description = models.TextField(blank=True, default="")
@@ -57,6 +56,8 @@ class ProductVariant(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    stock = models.IntegerField(default=0) # 안 쓰는 옛날 레퍼런스용 칼럼.
     adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용, 현재는 안 씀.)
 
 

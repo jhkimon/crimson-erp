@@ -34,7 +34,6 @@ class ProductVariantView(APIView):
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend]
     filterset_class = ProductVariantFilter
-    ordering_fields = ["stock", "price"]
 
     @swagger_auto_schema(
         operation_summary="상품 상세 정보 생성",
@@ -271,38 +270,45 @@ class ProductVariantDetailView(APIView):
         return Response(serializer.data)
 
     @swagger_auto_schema(
-        operation_summary="세부 품목 정보 수정 (방패필통 크림슨)",
+        operation_summary="세부 품목 정보 수정",
         tags=["inventory - Variant CRUD"],
         manual_parameters=[
             openapi.Parameter(
                 name="variant_code",
                 in_=openapi.IN_PATH,
-                description="수정할 variant_code (예: P00000YC000A)",
+                description="수정할 variant_code",
                 type=openapi.TYPE_STRING,
             )
         ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["product_id", "name", "option", "stock", "price"],
             properties={
-                "product_id": openapi.Schema(
-                    type=openapi.TYPE_STRING, example="P00000YC"
-                ),
                 "name": openapi.Schema(type=openapi.TYPE_STRING, example="방패 필통"),
-                "option": openapi.Schema(
-                    type=openapi.TYPE_STRING, example="색상 : 크림슨"
-                ),
+                "online_name": openapi.Schema(type=openapi.TYPE_STRING, example="방패 필통 크림슨"),
+                "big_category": openapi.Schema(type=openapi.TYPE_STRING, example="문구"),
+                "middle_category": openapi.Schema(type=openapi.TYPE_STRING, example="필기류"),
+                "category": openapi.Schema(type=openapi.TYPE_STRING, example="필통"),
+                "option": openapi.Schema(type=openapi.TYPE_STRING, example="색상 : 크림슨"),
+                "detail_option": openapi.Schema(type=openapi.TYPE_STRING, example=""),
                 "price": openapi.Schema(type=openapi.TYPE_INTEGER, example=5000),
                 "min_stock": openapi.Schema(type=openapi.TYPE_INTEGER, example=4),
                 "description": openapi.Schema(type=openapi.TYPE_STRING, example=""),
                 "memo": openapi.Schema(type=openapi.TYPE_STRING, example=""),
+                "channels": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_STRING),
+                    example=["online", "offline"],
+                ),
             },
         ),
         responses={200: ProductVariantSerializer, 400: "Bad Request", 404: "Not Found"},
     )
     def patch(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_code)
+            variant = ProductVariant.objects.get(
+                variant_code=variant_code,
+                is_active=True
+            )
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
@@ -318,8 +324,16 @@ class ProductVariantDetailView(APIView):
 
         if serializer.is_valid():
             serializer.save()
-            return Response(ProductVariantSerializer(serializer.instance).data)
+
+            return Response(
+                ProductVariantSerializer(
+                    serializer.instance,
+                    context={"request": request},
+                ).data
+            )
+
         return Response(serializer.errors, status=400)
+
 
     @swagger_auto_schema(
         operation_summary="세부 품목 정보 삭제 (방패필통 크림슨)",
@@ -336,10 +350,15 @@ class ProductVariantDetailView(APIView):
     )
     def delete(self, request, variant_code: str):
         try:
-            variant = ProductVariant.objects.get(variant_code=variant_code)
+            variant = ProductVariant.objects.get(
+                variant_code=variant_code,
+                is_active=True
+            )
         except ProductVariant.DoesNotExist:
             return Response({"error": "상세 정보가 존재하지 않습니다."}, status=404)
 
-        variant.delete()
+        variant.is_active = False
+        variant.save(update_fields=["is_active"])
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 

@@ -158,7 +158,6 @@ class ProductVariantExcelUploadView(APIView):
                 inbound = safe_int(row, "당월입고물량")
                 store_sales = safe_int(row, "매장 판매물량")
                 online_sales = safe_int(row, "쇼핑몰 판매물량")
-                stock = safe_int(row, "기말 재고")
 
                 # ✅ channels
                 channels = ["offline"]
@@ -185,7 +184,6 @@ class ProductVariantExcelUploadView(APIView):
                         "product": product,
                         "option": option,
                         "detail_option": detail_option,
-                        "stock": stock,
                         "price": 0,
                         "min_stock": 0,
                         "channels": channels,
@@ -197,10 +195,6 @@ class ProductVariantExcelUploadView(APIView):
                     created_variants += 1
                 else:
                     skipped_variants += 1
-
-                # ✅ 기말 재고는 항상 동기화
-                variant.stock = stock
-                variant.save(update_fields=["stock"])
 
                 # ✅ 월별 재고 스냅샷 생성 / 업데이트
                 _, status_created = ProductVariantStatus.objects.update_or_create(
