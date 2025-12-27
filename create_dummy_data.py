@@ -269,7 +269,7 @@ def create_inventory_adjustments(variants, employees):
             variant=v,
             delta=delta,
             reason="개발용 재고 보정",
-            created_by=random.choice(employees).username,
+            created_by=random.choice(employees).get_full_name(),
         )
 
         v.stock = max(0, v.stock + delta)
@@ -297,8 +297,6 @@ def create_product_variant_statuses(variants):
             inbound_quantity=random.randint(0, 40),
             store_sales=random.randint(0, 20),
             online_sales=random.randint(0, 15),
-            stock_adjustment=variant.adjustment,
-            stock_adjustment_reason="더미 생성",
         )
 
     print(f"   ✓ {len(variants)}개의 ProductVariantStatus 생성 완료")

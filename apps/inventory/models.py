@@ -57,6 +57,7 @@ class ProductVariant(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    ### 안 쓰는 칼럼 주의 ###
     stock = models.IntegerField(default=0) # 안 쓰는 옛날 레퍼런스용 칼럼.
     adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용, 현재는 안 씀.)
 
