@@ -35,7 +35,7 @@ class InventoryItemSummarySerializer(serializers.ModelSerializer):
 class ProductVariantSerializer(serializers.ModelSerializer):
 
     product_id = serializers.CharField(source="product.product_id", read_only=True)
-    name = serializers.CharField(source="product.name", read_only=True)
+    offline_name = serializers.CharField(source="product.name", read_only=True)
     online_name = serializers.CharField(source="product.online_name", read_only=True)
 
     big_category = serializers.CharField(source="product.big_category", read_only=True)
@@ -51,7 +51,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         model = ProductVariant
         fields = [
             "product_id",  # product_id
-            "name",
+            "offline_name",
             "online_name",
             "big_category",
             "middle_category",
