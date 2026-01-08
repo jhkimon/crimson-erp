@@ -93,27 +93,24 @@ class ProductVariantExcelUploadView(APIView):
                     option = safe_str(row, "옵션")
                     detail_option = safe_str(row, "상세옵션")
 
-                    # product_id 결정
                     if raw_variant_code and "-" in raw_variant_code:
-                        product_id, parsed_detail = raw_variant_code.rsplit("-", 1)
+                        product_id = raw_variant_code.split("-", 1)[0]
                     else:
-                        product_id = raw_variant_code
+                        product_id = raw_variant_code or None
 
-                    # variant_code 결정
-                    if raw_variant_code:
-                        variant_code = raw_variant_code
+                    variant_code = build_variant_code(
+                        product_id=product_id,
+                        product_name=product_name,
+                        option=option,
+                        detail_option=detail_option,
+                        allow_auto=True,
+                    )
 
-                    else:
-                        variant_code = build_variant_code(
-                            product_id=product_id or None,
-                            product_name=product_name,
-                            option=option,
-                            detail_option=detail_option,
-                            allow_auto=True,
-                        )
+                    if not product_id:
+                        product_id = variant_code.split("-", 1)[0]
+
 
                     option = option or ""
-
                     online_name = safe_str(row, "온라인 품목명")
 
                     warehouse_start = safe_int(row, "월초창고 재고")

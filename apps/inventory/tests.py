@@ -12,9 +12,27 @@ from apps.inventory.models import (
     InventoryAdjustment,
     ProductVariantStatus
 )
-from apps.inventory.utils.variant_code import generate_variant_code
+from apps.inventory.utils.variant_code import build_variant_code
 from django.contrib.auth import get_user_model
 from apps.inventory.utils.monthly_snapshot import rollover_variant_status
+
+class ExcelUploadTestMixin:
+    def make_excel_file(self, rows: list[dict]):
+        df = pd.DataFrame(rows)
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            pd.DataFrame([[], []]).to_excel(
+                writer, index=False, header=False
+            )
+            df.to_excel(writer, index=False, startrow=2)
+
+        buffer.seek(0)
+        return SimpleUploadedFile(
+            "inventory.xlsx",
+            buffer.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
 
 User = get_user_model()
@@ -438,6 +456,7 @@ class ProductVariantExcelUploadBasicTest(APITestCase):
             "오프라인 품목명": ["테스트 상품"],
             "온라인 품목명": ["테스트 상품 온라인"],
             "옵션": ["블랙"],
+            "상세옵션": [""],
             "기말 재고": [100],
             "월초창고 재고": [40],
             "월초매장 재고": [30],
@@ -492,7 +511,7 @@ class ProductVariantExcelUploadBasicTest(APITestCase):
         # Variant 생성 확인
         self.assertEqual(ProductVariant.objects.count(), 1)
         variant = ProductVariant.objects.first()
-        self.assertEqual(variant.variant_code, "P10000-A")
+        self.assertEqual(variant.variant_code, "P10000-블랙")
 
         # Product 생성 확인
         self.assertEqual(InventoryItem.objects.count(), 1)
@@ -617,18 +636,37 @@ class VariantCodeUtilTest(APITestCase):
 
     def test_generate_variant_code_cases(self):
         self.assertEqual(
-            generate_variant_code("P001", "", ""),
+            build_variant_code(
+                product_id="P001",
+                product_name="테스트 상품",
+                option="",
+                detail_option="",
+                allow_auto=False,
+            ),
             "P001-DEFAULT"
         )
+
         self.assertEqual(
-            generate_variant_code("P001", "화이트", ""),
+            build_variant_code(
+                product_id="P001",
+                product_name="테스트 상품",
+                option="화이트",
+                detail_option="",
+                allow_auto=False,
+            ),
             "P001-화이트".upper()
         )
+
         self.assertEqual(
-            generate_variant_code("P001", "화이트", "M"),
+            build_variant_code(
+                product_id="P001",
+                product_name="테스트 상품",
+                option="화이트",
+                detail_option="M",
+                allow_auto=False,
+            ),
             "P001-화이트-M".upper()
         )
-
 class ProductVariantStatusRolloverTest(APITestCase):
     """
     월별 ProductVariantStatus 자동 이월 테스트
@@ -711,4 +749,187 @@ class ProductVariantStatusRolloverTest(APITestCase):
         result = rollover_variant_status(2024, 11)
 
         self.assertEqual(result["created_count"], 0)
+
+class ProductVariantExcelUploadAutoSkuTest(ExcelUploadTestMixin, APITestCase):
+
+    def test_product_id_empty_generates_auto_sku(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "",
+                "오프라인 품목명": "자동 상품",
+                "온라인 품목명": "",
+                "옵션": "블랙",
+                "상세옵션": "M",
+                "월초창고 재고": 10,
+                "월초매장 재고": 5,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            }
+        ])
+
+        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        variant = ProductVariant.objects.get()
+        self.assertIn("-AUTO-", variant.variant_code)
+        self.assertTrue(variant.product.product_id)
+
+class ProductVariantExcelUploadAutoSkuTest(ExcelUploadTestMixin, APITestCase):
+
+    def test_product_id_empty_generates_auto_sku(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "",
+                "오프라인 품목명": "자동 상품",
+                "온라인 품목명": "",
+                "옵션": "블랙",
+                "상세옵션": "M",
+                "월초창고 재고": 10,
+                "월초매장 재고": 5,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            }
+        ])
+
+        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        variant = ProductVariant.objects.get()
+        self.assertIn("-AUTO-", variant.variant_code)
+        self.assertTrue(variant.product.product_id)
+
+class ProductVariantExcelUploadDefaultOptionTest(ExcelUploadTestMixin, APITestCase):
+
+    def test_no_option_default_variant(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "P30000",
+                "오프라인 품목명": "옵션없는 상품",
+                "온라인 품목명": "",
+                "옵션": "",
+                "상세옵션": "",
+                "월초창고 재고": 0,
+                "월초매장 재고": 0,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            }
+        ])
+
+        self.client.post(url, {"file": upload_file}, format="multipart")
+
+        variant = ProductVariant.objects.get()
+        self.assertEqual(variant.variant_code, "P30000-DEFAULT")
+
+class ProductVariantExcelUploadReuploadTest(ExcelUploadTestMixin, APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P40000",
+            name="재업로드 상품"
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P40000-BLACK-M",
+            option="BLACK",
+            detail_option="M",
+            is_active=True,
+        )
+
+    def test_reupload_updates_status_only(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "P40000",
+                "오프라인 품목명": "재업로드 상품",
+                "온라인 품목명": "",
+                "옵션": "BLACK",
+                "상세옵션": "M",
+                "월초창고 재고": 99,
+                "월초매장 재고": 1,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            }
+        ])
+
+        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        self.assertEqual(response.status_code, 201)
+
+        self.assertEqual(ProductVariant.objects.count(), 1)
+
+        status_obj = ProductVariantStatus.objects.get(variant=self.variant)
+        self.assertEqual(status_obj.warehouse_stock_start, 99)
+
+
+class ProductVariantExcelUploadInvalidNumberTest(ExcelUploadTestMixin, APITestCase):
+
+    def test_invalid_numeric_causes_rollback(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "P50000",
+                "오프라인 품목명": "에러 상품",
+                "온라인 품목명": "",
+                "옵션": "A",
+                "상세옵션": "B",
+                "월초창고 재고": "십개",  # ❌
+                "월초매장 재고": 0,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            }
+        ])
+
+        response = self.client.post(url, {"file": upload_file}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+
+        self.assertEqual(ProductVariant.objects.count(), 0)
+        self.assertIn("에러 상품", response.data["detail"])
+
+class ProductVariantExcelUploadMultiOptionTest(ExcelUploadTestMixin, APITestCase):
+
+    def test_multiple_options_create_multiple_variants(self):
+        url = reverse("variant-excel-upload")
+
+        upload_file = self.make_excel_file([
+            {
+                "상품코드": "P60000",
+                "오프라인 품목명": "멀티 옵션 상품",
+                "온라인 품목명": "",
+                "옵션": "BLACK",
+                "상세옵션": "",
+                "월초창고 재고": 0,
+                "월초매장 재고": 0,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            },
+            {
+                "상품코드": "P60000",
+                "오프라인 품목명": "멀티 옵션 상품",
+                "온라인 품목명": "",
+                "옵션": "WHITE",
+                "상세옵션": "",
+                "월초창고 재고": 0,
+                "월초매장 재고": 0,
+                "당월입고물량": 0,
+                "매장 판매물량": 0,
+                "쇼핑몰 판매물량": 0,
+            },
+        ])
+
+        self.client.post(url, {"file": upload_file}, format="multipart")
+
+        self.assertEqual(ProductVariant.objects.count(), 2)
 

@@ -19,9 +19,9 @@ def safe_str(row, col):
 
 
 def safe_int(row, col):
-    val = row.get(col, 0)
+    val = row.get(col)
 
-    if pd.isna(val):
+    if val is None or pd.isna(val):
         return 0
 
     if isinstance(val, str):
@@ -32,4 +32,4 @@ def safe_int(row, col):
     try:
         return int(val)
     except (ValueError, TypeError):
-        return 0
+        raise ValueError(f"{col} 숫자 변환 실패: {val}")
