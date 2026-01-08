@@ -23,7 +23,12 @@ from ..models import (
 )
 
 from ..filters import ProductVariantStatusFilter
+from rest_framework.pagination import PageNumberPagination
 
+class VariantStatusPagination(PageNumberPagination):
+    page_size = 10                 # 기본값
+    page_size_query_param = "page_size"
+    max_page_size = 200            # 안전장치
 
 class ProductVariantStatusListView(generics.ListAPIView):
     """
@@ -34,6 +39,7 @@ class ProductVariantStatusListView(generics.ListAPIView):
     filter_backends = [DjangoFilterBackend]
     filterset_class = ProductVariantStatusFilter
     ordering = ["product__product_id", "variant__variant_code"]
+    pagination_class = VariantStatusPagination
 
     @swagger_auto_schema(
         operation_summary="재고 현황 확인",
@@ -49,6 +55,20 @@ class ProductVariantStatusListView(generics.ListAPIView):
                 type=openapi.TYPE_INTEGER,
                 required=True,
                 description="조회 월 (1~12)"
+            ),
+            openapi.Parameter(
+                "page",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="페이지 번호 (default: 1)",
+            ),
+            openapi.Parameter(
+                "page_size",
+                openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="페이지당 행 수 (default: 10, max: 200)",
             ),
         ],
         tags=["inventory - Variant Status (엑셀 행 하나)"],
