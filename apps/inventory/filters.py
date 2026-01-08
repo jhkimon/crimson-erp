@@ -32,11 +32,20 @@ class ProductVariantFilter(django_filters.FilterSet):
 
     
 class InventoryAdjustmentFilter(django_filters.FilterSet):
-    variant_code = django_filters.CharFilter(field_name='variant__variant_code', lookup_expr='exact')
+    variant_code = django_filters.CharFilter(
+        field_name="variant__variant_code",
+        lookup_expr="exact"
+    )
+    year = django_filters.NumberFilter()
+    month = django_filters.NumberFilter()
 
     class Meta:
         model = InventoryAdjustment
-        fields = ['variant_code']
+        fields = [
+            "variant_code",
+            "year",
+            "month",
+        ]
 
 
 class ProductVariantStatusFilter(django_filters.FilterSet):

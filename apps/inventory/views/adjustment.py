@@ -54,14 +54,47 @@ class InventoryAdjustmentView(generics.ListCreateAPIView):
     # GET: 조정 이력 조회
     # -------------------------
     @swagger_auto_schema(
-        operation_summary="재고 조정 이력 조회",
+    operation_summary="재고 조정 이력 조회",
         operation_description=(
             "재고 조정 이력을 조회합니다.\n\n"
             "- variant_code, year, month 기준 필터 가능\n"
-            "- 최신순 정렬"
+            "- 최신순 정렬\n"
+            "- django-filter 기반"
         ),
-        tags=["inventory - Stock Adjust"],
-    )
+        manual_parameters=[
+            openapi.Parameter(
+                name="variant_code",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="상품 variant_code",
+                example="P00001-A",
+            ),
+            openapi.Parameter(
+                name="year",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="조회 연도 (예: 2025)",
+            ),
+            openapi.Parameter(
+                name="month",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="조회 월 (1~12)",
+            ),
+            openapi.Parameter(
+                name="ordering",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description="정렬 필드 (예: created_at, -created_at)",
+                example="-created_at",
+            ),
+    ],
+    tags=["inventory - Stock Adjust"],
+)
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
