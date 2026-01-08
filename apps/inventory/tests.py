@@ -14,6 +14,8 @@ from apps.inventory.models import (
 )
 from apps.inventory.utils.variant_code import generate_variant_code
 from django.contrib.auth import get_user_model
+from apps.inventory.utils.monthly_snapshot import rollover_variant_status
+
 
 User = get_user_model()
 class InventoryQuickViewTest(APITestCase):
@@ -626,3 +628,87 @@ class VariantCodeUtilTest(APITestCase):
             generate_variant_code("P001", "화이트", "M"),
             "P001-화이트-M".upper()
         )
+
+class ProductVariantStatusRolloverTest(APITestCase):
+    """
+    월별 ProductVariantStatus 자동 이월 테스트
+    """
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P99999",
+            name="이월 테스트 상품",
+            category="테스트",
+        )
+
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P99999-A",
+            option="TEST",
+            detail_option="M",
+            is_active=True,
+        )
+
+        # 전달 (2025년 12월) 상태
+        self.prev_status = ProductVariantStatus.objects.create(
+            year=2025,
+            month=12,
+            product=self.product,
+            variant=self.variant,
+            warehouse_stock_start=100,
+            store_stock_start=50,
+            inbound_quantity=30,
+            store_sales=20,
+            online_sales=10,
+        )
+
+    def test_rollover_creates_next_month_status(self):
+        """
+        전달 기준으로 다음 달 ProductVariantStatus 생성
+        """
+        result = rollover_variant_status(2025, 12)
+
+        self.assertEqual(result["year"], 2026)
+        self.assertEqual(result["month"], 1)
+        self.assertEqual(result["created_count"], 1)
+
+        status = ProductVariantStatus.objects.get(
+            year=2026,
+            month=1,
+            variant=self.variant,
+        )
+
+        # 🔑 상품 정보는 유지
+        self.assertEqual(status.product, self.product)
+        self.assertEqual(status.variant, self.variant)
+
+        # 🔑 재고 필드는 전부 0
+        self.assertEqual(status.warehouse_stock_start, 0)
+        self.assertEqual(status.store_stock_start, 0)
+        self.assertEqual(status.inbound_quantity, 0)
+        self.assertEqual(status.store_sales, 0)
+        self.assertEqual(status.online_sales, 0)
+
+    def test_rollover_is_idempotent(self):
+        """
+        여러 번 실행해도 중복 생성되지 않음
+        """
+        rollover_variant_status(2025, 12)
+        rollover_variant_status(2025, 12)
+
+        count = ProductVariantStatus.objects.filter(
+            year=2026,
+            month=1,
+            variant=self.variant,
+        ).count()
+
+        self.assertEqual(count, 1)
+
+    def test_rollover_does_nothing_when_no_previous_data(self):
+        """
+        전달 데이터가 없으면 생성되지 않음
+        """
+        result = rollover_variant_status(2024, 11)
+
+        self.assertEqual(result["created_count"], 0)
+

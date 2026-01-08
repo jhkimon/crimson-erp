@@ -22,7 +22,6 @@ from ..models import (
 )
 
 from ..filters import ProductVariantFilter
-from ..utils.variant_code import generate_variant_code
 
 # 상품 상세 정보 관련 View
 class ProductVariantView(APIView):

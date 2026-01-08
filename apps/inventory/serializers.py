@@ -2,7 +2,8 @@ from rest_framework import serializers
 from django.db.models import Sum
 from django.utils import timezone
 
-from apps.inventory.utils.variant_code import generate_variant_code
+from apps.inventory.utils.variant_code import build_variant_code
+
 
 from .models import (
     InventoryItem,
@@ -358,10 +359,12 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         option = validated_data.get("option", "")
         detail_option = validated_data.get("detail_option", "")
 
-        validated_data["variant_code"] = generate_variant_code(
-            product.product_id,
-            option,
-            detail_option,
+        validated_data["variant_code"] = build_variant_code(
+            product_id=product.product_id,
+            product_name=product.name,
+            option=option,
+            detail_option=detail_option,
+            allow_auto=False, 
         )
 
         variant = ProductVariant.objects.create(
