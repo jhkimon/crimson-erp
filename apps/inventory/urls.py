@@ -1,58 +1,52 @@
 from django.urls import path
 from .views import (
+    # QuickView
     ProductOptionListView,
     InventoryCategoryListView,
+    InventoryItemView,
+    # Upload
+    ProductVariantExcelUploadView,
+    # ProductVariant
+    ProductVariantView,
     ProductVariantDetailView,
     ProductVariantExportView,
-    InventoryItemView,
-    ProductVariantView,
-    InventoryItemMergeView,
-    ProductVariantCSVUploadView,
-    StockUpdateView,
-    InventoryRollbackView,
-    InventoryAdjustmentListView,
-    InventorySnapshotListCreateView,
-    InventorySnapshotRetrieveView,
+    # Adjustment
+    InventoryAdjustmentView,
+    # ProductVariantStatus
+    ProductVariantStatusListView,
+    ProductVariantStatusDetailView
 )
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name="inventory_options"),
     path("category/", InventoryCategoryListView.as_view(), name="inventory-category"),
     path("variants/", ProductVariantView.as_view(), name="variant"),
-    path("variants/export/", ProductVariantExportView.as_view(), name="variant_export"),
-    path(
-        "variants/merge/",
-        InventoryItemMergeView.as_view(),
-        name="inventoryitem-variant-merge",
-    ),
+    path("variants/export/", ProductVariantExportView.as_view(), name="variant-export"),
     path(
         "adjustments/",
-        InventoryAdjustmentListView.as_view(),
+        InventoryAdjustmentView.as_view(),
         name="inventory-adjustments",
     ),
+    path(
+        "variants/upload-excel/",
+        ProductVariantExcelUploadView.as_view(),
+        name="variant-excel-upload",
+    ),
+
     path(
         "variants/<str:variant_code>/",
         ProductVariantDetailView.as_view(),
         name="variant-detail",
     ),
     path(
-        "upload/", ProductVariantCSVUploadView.as_view(), name="product-variant-upload"
+        "variant-status/",
+        ProductVariantStatusListView.as_view(),
+        name="variant-status-list",
     ),
     path(
-        "rollback/<int:id>/", InventoryRollbackView.as_view(), name="inventory-rollback"
+    "variant-status/<int:year>/<int:month>/<str:variant_code>/",
+    ProductVariantStatusDetailView.as_view(),
+    name="variant-status-detail",
     ),
     path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
-    path(
-        "variants/stock/<str:variant_code>/",
-        StockUpdateView.as_view(),
-        name="stock-update",
-    ),
-    path(
-        "snapshot", InventorySnapshotListCreateView.as_view(), name="snapshot-list"
-    ),  # GET /snapshot
-    path(
-        "snapshot/<int:id>/",
-        InventorySnapshotRetrieveView.as_view(),
-        name="snapshot-detail",
-    ),  # GET /snapshot/{id}
 ]
