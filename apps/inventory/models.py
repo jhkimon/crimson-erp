@@ -22,6 +22,9 @@ class InventoryItem(models.Model):
     name = models.CharField(max_length=255, blank=True) # 오프라인 이름
     online_name = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    management_code = models.CharField(max_length=50, blank=True, null=True) # 사용 안 함, DB 유지용으로 남김.
+    is_active = models.BooleanField(default=True)
+  
 
     class Meta:
         db_table = "products"
@@ -60,6 +63,9 @@ class ProductVariant(models.Model):
     ### 안 쓰는 칼럼 주의 ###
     stock = models.IntegerField(default=0) # 안 쓰는 옛날 레퍼런스용 칼럼.
     adjustment = models.IntegerField(default=0) # 임시 재고 조정값 (재고 불일치 보정용, 현재는 안 씀.)
+    order_count = models.PositiveIntegerField(default=0) # order은 별도 칼럼에서 계산
+    return_count = models.PositiveIntegerField(default=0) # 환불 기록 안 함.
+    is_active = models.BooleanField(default=True)
 
 
     class Meta:
@@ -113,3 +119,4 @@ class InventoryAdjustment(models.Model):
 
     def __str__(self):
         return f"Adjustment for {self.variant.variant_code}: {self.delta}"
+    
