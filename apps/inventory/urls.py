@@ -65,16 +65,17 @@ urlpatterns = [
     ),
     path(
     "variant-status/<int:year>/<int:month>",
-    ProductVariantStatusCreateView.as_view()
+    ProductVariantStatusCreateView.as_view(),
     ),
     path(
     "variant-status/bulk",
-    ProductVariantStatusBulkUpdateView.as_view()
+    ProductVariantStatusBulkUpdateView.as_view(),
+    name="variant-status-bulk"
     ),
     path(
         "variant-status/sync-inbound/<int:year>/<int:month>/",
         SyncInboundFromOrdersView.as_view(),
-        name="variant-status-sync-inbound",
+        name="inventory-sync-inbound",
     ),
     path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
 ]
