@@ -39,4 +39,5 @@ def complete_order(order: Order):
             status_obj.save(update_fields=["inbound_quantity"])
 
     order.status = Order.STATUS_COMPLETED
-    order.save(update_fields=["status"])
+    order.completed_at = completed_at
+    order.save(update_fields=["status", "completed_at"])

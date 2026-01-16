@@ -5,3 +5,4 @@ from .variant_upload import *
 from .variant_status_export import *
 from .variant_status import *
 from .adjustment import *
+from .sync_data import *
