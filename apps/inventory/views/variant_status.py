@@ -264,6 +264,7 @@ class ProductVariantStatusListView(generics.ListAPIView):
 class ProductVariantStatusDetailView(APIView):
     """
     PATCH: 월별 재고 스냅샷(ProductVariantStatus) 수동 수정
+    DELETE: 재고 스냅샷 삭제
 
     PATCH /inventory/variant-status/{year}/{month}/{variant_code}/
 
@@ -390,6 +391,78 @@ class ProductVariantStatusDetailView(APIView):
 
         serializer = ProductVariantStatusSerializer(status_obj)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @swagger_auto_schema(
+        operation_summary="재고 행 삭제",
+        operation_description=(
+            "엑셀 화면에서 선택한 한 행(ProductVariantStatus)을 삭제합니다.\n\n"
+            "삭제 기준:\n"
+            "- year / month / variant_code로 대상 행 식별\n\n"
+            "주의:\n"
+            "- 삭제된 데이터는 복구할 수 없습니다.\n"
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                name="year",
+                in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER,
+                required=True,
+                description="연도 (예: 2026)",
+            ),
+            openapi.Parameter(
+                name="month",
+                in_=openapi.IN_PATH,
+                type=openapi.TYPE_INTEGER,
+                required=True,
+                description="월 (1~12)",
+            ),
+            openapi.Parameter(
+                name="variant_code",
+                in_=openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                required=True,
+                description="상품 variant_code (예: P00000FE000A)",
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="삭제 성공",
+                examples={
+                    "application/json": {
+                        "message": "행 삭제 완료",
+                        "variant_code": "P00000FE000A"
+                    }
+                },
+            ),
+            404: "존재하지 않는 행",
+        },
+        tags=["inventory - Variant Status (엑셀 행 하나)"],
+    )
+
+    def delete(self, request, year: int, month: int, variant_code: str):
+
+        variant = get_object_or_404(
+            ProductVariant,
+            variant_code=variant_code,
+            is_active=True
+        )
+
+        status_obj = get_object_or_404(
+            ProductVariantStatus,
+            year=year,
+            month=month,
+            variant=variant
+        )
+
+        status_obj.delete()
+
+        return Response(
+            {
+                "message": "행 삭제 완료",
+                "variant_code": variant_code
+            },
+            status=200
+        )
     
 class ProductVariantStatusBulkUpdateView(APIView):
     permission_classes = [AllowAny]
