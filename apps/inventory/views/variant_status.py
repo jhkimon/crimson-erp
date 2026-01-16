@@ -7,6 +7,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 
+from django.db import transaction
+from django.db.models import Sum
+
 # Swagger
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -19,11 +22,119 @@ from ..serializers import (
 
 from ..models import (
     ProductVariant,
-    ProductVariantStatus
+    ProductVariantStatus,
+    InventoryAdjustment
 )
 
 from ..filters import ProductVariantStatusFilter
 from rest_framework.pagination import PageNumberPagination
+
+class ProductVariantStatusCreateView(APIView):
+    """
+    POST /inventory/variant-status/{year}/{month}
+    저번 달 재고 기준으로 이번 달 스냅샷 생성
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, year: int, month: int):
+
+        # -------- validation --------
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response(
+                {"detail": "year, month는 정수여야 합니다."},
+                status=400
+            )
+
+        if not (1 <= month <= 12):
+            return Response(
+                {"detail": "month는 1~12 사이여야 합니다."},
+                status=400
+            )
+
+        # -------- 저번달 계산 --------
+        if month == 1:
+            prev_year = year - 1
+            prev_month = 12
+        else:
+            prev_year = year
+            prev_month = month - 1
+
+        # -------- 저번달 데이터 --------
+        prev_status_qs = ProductVariantStatus.objects.select_related(
+            "variant", "product"
+        ).filter(
+            year=prev_year,
+            month=prev_month,
+        )
+
+        if not prev_status_qs.exists():
+            return Response(
+                {"detail": "저번 달 재고 데이터가 없습니다."},
+                status=404
+            )
+
+        created_count = 0
+        skipped_count = 0
+
+        with transaction.atomic():
+
+            for prev in prev_status_qs:
+
+                # 이미 이번달 데이터 있으면 skip
+                if ProductVariantStatus.objects.filter(
+                    year=year,
+                    month=month,
+                    variant=prev.variant
+                ).exists():
+                    skipped_count += 1
+                    continue
+
+                adjustment_sum = (
+                    InventoryAdjustment.objects.filter(
+                        variant=prev.variant,
+                        year=prev_year,
+                        month=prev_month,
+                    ).aggregate(total=Sum("delta"))["total"]
+                    or 0
+                )
+
+                ending_stock = (
+                    prev.warehouse_stock_start
+                    + prev.store_stock_start
+                    + prev.inbound_quantity
+                    - (prev.store_sales + prev.online_sales)
+                    + adjustment_sum
+                )
+
+                # -------- 이번달 생성 --------
+                ProductVariantStatus.objects.create(
+                    product=prev.product,
+                    variant=prev.variant,
+                    year=year,
+                    month=month,
+                    warehouse_stock_start=ending_stock,
+                    store_stock_start=0,
+                    inbound_quantity=0,
+                    store_sales=0,
+                    online_sales=0,
+                )
+
+                created_count += 1
+
+        return Response(
+            {
+                "message": "이번 달 재고 스냅샷 생성 완료",
+                "year": year,
+                "month": month,
+                "created": created_count,
+                "skipped": skipped_count,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 class VariantStatusPagination(PageNumberPagination):
     page_size = 10                 # 기본값

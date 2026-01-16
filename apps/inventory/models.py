@@ -55,7 +55,6 @@ class ProductVariant(models.Model):
     memo = models.TextField(blank=True, default="")
     cost_price = models.PositiveIntegerField(default=0) # 원가 (order 원가 저장용)
     price = models.PositiveIntegerField(default=0) # 판매가
-    is_active = models.BooleanField(default=True) # 제품 삭제시 대응
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

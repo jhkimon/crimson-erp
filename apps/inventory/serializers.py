@@ -45,7 +45,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     description = serializers.CharField(source="product.description", read_only=True)
 
     detail_option = serializers.CharField(read_only=True)
-    stock = serializers.SerializerMethodField()
+    # stock = serializers.SerializerMethodField()
     channels = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
@@ -60,9 +60,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "variant_code",  # variant_code
             "option",  # 옵션
             "detail_option",
-            "stock",
+            # "stock",
             "price",  # 가격
-            "min_stock",  # 최소재고
+            # "min_stock",  # 최소재고
             "description",  # 상품설명
             "memo",  # 메모
             "channels",  # 온라인/오프라인 태그
