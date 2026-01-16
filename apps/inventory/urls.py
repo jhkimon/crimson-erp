@@ -15,6 +15,7 @@ from .views import (
     # ProductVariantStatus
     ProductVariantStatusListView,
     ProductVariantStatusDetailView,
+    ProductVariantStatusBulkUpdateView,
     ProductVariantStatusCreateView
 )
 
@@ -49,9 +50,13 @@ urlpatterns = [
     ProductVariantStatusDetailView.as_view(),
     name="variant-status-detail",
     ),
-    path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
     path(
-    "inventory/variant-status/<int:year>/<int:month>",
+    "variant-status/<int:year>/<int:month>",
     ProductVariantStatusCreateView.as_view()
-),
+    ),
+    path(
+    "variant-status/bulk",
+    ProductVariantStatusBulkUpdateView.as_view()
+    ),
+    path("<str:product_id>/", InventoryItemView.as_view(), name="inventoryitem-detail"),
 ]

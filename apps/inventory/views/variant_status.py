@@ -36,7 +36,51 @@ class ProductVariantStatusCreateView(APIView):
     """
 
     permission_classes = [AllowAny]
-
+    @swagger_auto_schema(
+            operation_summary="저번 달 재고 불러오기 (이번 달 엑셀 생성)",
+            operation_description=(
+                "저번 달(ProductVariantStatus)을 기준으로\n"
+                "이번 달 재고 스냅샷을 자동 생성합니다.\n\n"
+                "동작 규칙:\n"
+                "- {year}/{month} = 생성할 대상 월\n"
+                "- 저번 달 데이터가 없으면 404\n"
+                "- 이미 이번 달 데이터가 있으면 스킵\n"
+                "- 저번 달 기말재고 → 이번 달 창고 기초재고로 이월\n"
+            ),
+            manual_parameters=[
+                openapi.Parameter(
+                    name="year",
+                    in_=openapi.IN_PATH,
+                    type=openapi.TYPE_INTEGER,
+                    required=True,
+                    description="생성할 연도 (예: 2026)",
+                ),
+                openapi.Parameter(
+                    name="month",
+                    in_=openapi.IN_PATH,
+                    type=openapi.TYPE_INTEGER,
+                    required=True,
+                    description="생성할 월 (1~12)",
+                ),
+            ],
+            responses={
+                201: openapi.Response(
+                    description="생성 완료",
+                    examples={
+                        "application/json": {
+                            "message": "이번 달 재고 스냅샷 생성 완료",
+                            "year": 2026,
+                            "month": 2,
+                            "created": 120,
+                            "skipped": 3,
+                        }
+                    },
+                ),
+                400: "잘못된 요청 (year/month 형식 오류)",
+                404: "저번 달 데이터 없음",
+            },
+            tags=["inventory - Variant Status (엑셀 행 하나)"],
+        )
     def post(self, request, year: int, month: int):
 
         # -------- validation --------
@@ -346,3 +390,91 @@ class ProductVariantStatusDetailView(APIView):
 
         serializer = ProductVariantStatusSerializer(status_obj)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class ProductVariantStatusBulkUpdateView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="월별 재고 일괄 저장",
+        operation_description="엑셀 저장 버튼용 벌크 수정 API",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "year": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "month": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "rows": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "variant_code": openapi.Schema(type=openapi.TYPE_STRING),
+                            "warehouse_stock_start": openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "store_stock_start": openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "inbound_quantity": openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "store_sales": openapi.Schema(type=openapi.TYPE_INTEGER),
+                            "online_sales": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        }
+                    )
+                )
+            }
+        ),
+        tags=["inventory - Variant Status (엑셀 전체 대응)"]
+    )
+    def patch(self, request):
+
+        year = request.data.get("year")
+        month = request.data.get("month")
+        rows = request.data.get("rows", [])
+
+        if not year or not month or not rows:
+            return Response(
+                {"detail": "year, month, rows 필수"},
+                status=400
+            )
+
+        allowed = {
+            "warehouse_stock_start",
+            "store_stock_start",
+            "inbound_quantity",
+            "store_sales",
+            "online_sales"
+        }
+
+        updated = 0
+
+        with transaction.atomic():
+
+            for row in rows:
+
+                variant_code = row.get("variant_code")
+                if not variant_code:
+                    continue
+
+                variant = ProductVariant.objects.get(
+                    variant_code=variant_code,
+                    is_active=True
+                )
+
+                status_obj = ProductVariantStatus.objects.get(
+                    year=year,
+                    month=month,
+                    variant=variant
+                )
+
+                dirty = []
+
+                for k, v in row.items():
+                    if k in allowed:
+                        setattr(status_obj, k, v)
+                        dirty.append(k)
+
+                if dirty:
+                    status_obj.save(update_fields=dirty)
+                    updated += 1
+
+        return Response(
+            {
+                "message": "벌크 저장 완료",
+                "updated": updated
+            }
+        )
