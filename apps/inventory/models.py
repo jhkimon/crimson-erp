@@ -92,6 +92,7 @@ class ProductVariantStatus(models.Model):
     online_sales = models.IntegerField(default=0)           # 쇼핑몰판매
 
     created_at = models.DateTimeField(auto_now_add=True)
+    version = models.IntegerField(default=0)
 
     class Meta:
         unique_together = ("year", "month", "variant")

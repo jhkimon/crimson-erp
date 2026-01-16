@@ -395,31 +395,110 @@ class ProductVariantStatusBulkUpdateView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_summary="월별 재고 일괄 저장",
-        operation_description="엑셀 저장 버튼용 벌크 수정 API",
+        operation_summary="월별 재고 일괄 저장 (동시 수정 대응)",
+        operation_description=(
+            "엑셀 화면에서 여러 행을 한 번에 저장하는 벌크 수정 API입니다.\n\n"
+            "동시 수정 방지를 위해 Optimistic Lock(version)을 사용합니다.\n\n"
+            "동작 방식:\n"
+            "1. GET API에서 각 행의 version 값을 받습니다.\n"
+            "2. 저장 시 동일한 version 값을 함께 전송해야 합니다.\n"
+            "3. 서버 version과 다르면 해당 행은 저장되지 않고 conflicts에 반환됩니다.\n\n"
+            "응답 필드:\n"
+            "- updated: 정상 저장된 행 수\n"
+            "- conflicts: 동시 수정 충돌 발생 행 목록\n"
+            "- errors: 잘못된 데이터 행 목록\n"
+        ),
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
+            required=["year", "month", "rows"],
             properties={
-                "year": openapi.Schema(type=openapi.TYPE_INTEGER),
-                "month": openapi.Schema(type=openapi.TYPE_INTEGER),
+                "year": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    example=2026,
+                    description="수정할 연도"
+                ),
+                "month": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    example=2,
+                    description="수정할 월 (1~12)"
+                ),
                 "rows": openapi.Schema(
                     type=openapi.TYPE_ARRAY,
+                    description="수정할 행 목록",
                     items=openapi.Schema(
                         type=openapi.TYPE_OBJECT,
+                        required=["variant_code", "version"],
                         properties={
-                            "variant_code": openapi.Schema(type=openapi.TYPE_STRING),
-                            "warehouse_stock_start": openapi.Schema(type=openapi.TYPE_INTEGER),
-                            "store_stock_start": openapi.Schema(type=openapi.TYPE_INTEGER),
-                            "inbound_quantity": openapi.Schema(type=openapi.TYPE_INTEGER),
-                            "store_sales": openapi.Schema(type=openapi.TYPE_INTEGER),
-                            "online_sales": openapi.Schema(type=openapi.TYPE_INTEGER),
-                        }
-                    )
-                )
-            }
+                            "variant_code": openapi.Schema(
+                                type=openapi.TYPE_STRING,
+                                example="P00001-A",
+                                description="상품 옵션 코드"
+                            ),
+                            "version": openapi.Schema(
+                                type=openapi.TYPE_INTEGER,
+                                example=3,
+                                description="GET API에서 받은 version 값"
+                            ),
+                            "warehouse_stock_start": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, example=120
+                            ),
+                            "store_stock_start": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, example=30
+                            ),
+                            "inbound_quantity": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, example=50
+                            ),
+                            "store_sales": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, example=20
+                            ),
+                            "online_sales": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, example=10
+                            ),
+                        },
+                    ),
+                ),
+            },
+            example={
+                "year": 2026,
+                "month": 2,
+                "rows": [
+                    {
+                        "variant_code": "P00001-A",
+                        "warehouse_stock_start": 120,
+                        "store_sales": 20,
+                        "version": 0
+                    },
+                    {
+                        "variant_code": "P00002-A",
+                        "inbound_quantity": 50,
+                        "version": 1
+                    }
+                ]
+            },
         ),
-        tags=["inventory - Variant Status (엑셀 전체 대응)"]
+        responses={
+            200: openapi.Response(
+                description="벌크 저장 결과",
+                examples={
+                    "application/json": {
+                        "message": "벌크 저장 완료",
+                        "updated": 1,
+                        "conflicts": [
+                            {
+                                "variant_code": "P00000FE000B",
+                                "server_version": 2,
+                                "client_version": 1
+                            }
+                        ],
+                        "errors": []
+                    }
+                }
+            ),
+            400: "잘못된 요청 (필수 파라미터 누락)",
+        },
+        tags=["inventory - Variant Status (엑셀 전체 대응)"],
     )
+
     def patch(self, request):
 
         year = request.data.get("year")
@@ -441,26 +520,56 @@ class ProductVariantStatusBulkUpdateView(APIView):
         }
 
         updated = 0
+        conflicts = []
+        errors = []
 
         with transaction.atomic():
 
             for row in rows:
 
                 variant_code = row.get("variant_code")
+                client_version = row.get("version")
+
                 if not variant_code:
                     continue
 
-                variant = ProductVariant.objects.get(
-                    variant_code=variant_code,
-                    is_active=True
-                )
+                # 1. Variant 조회
+                try:
+                    variant = ProductVariant.objects.get(
+                        variant_code=variant_code,
+                        is_active=True
+                    )
+                except ProductVariant.DoesNotExist:
+                    errors.append({
+                        "variant_code": variant_code,
+                        "error": "존재하지 않는 variant"
+                    })
+                    continue
 
-                status_obj = ProductVariantStatus.objects.get(
-                    year=year,
-                    month=month,
-                    variant=variant
-                )
+                # 2. Status 조회
+                try:
+                    status_obj = ProductVariantStatus.objects.get(
+                        year=year,
+                        month=month,
+                        variant=variant
+                    )
+                except ProductVariantStatus.DoesNotExist:
+                    errors.append({
+                        "variant_code": variant_code,
+                        "error": "해당 월 재고 데이터 없음"
+                    })
+                    continue
 
+                # 3. version 충돌 체크
+                if client_version != status_obj.version:
+                    conflicts.append({
+                        "variant_code": variant_code,
+                        "server_version": status_obj.version,
+                        "client_version": client_version,
+                    })
+                    continue
+
+                # 4. 실제 업데이트
                 dirty = []
 
                 for k, v in row.items():
@@ -469,12 +578,17 @@ class ProductVariantStatusBulkUpdateView(APIView):
                         dirty.append(k)
 
                 if dirty:
+                    status_obj.version += 1
+                    dirty.append("version")
+
                     status_obj.save(update_fields=dirty)
                     updated += 1
 
         return Response(
             {
                 "message": "벌크 저장 완료",
-                "updated": updated
+                "updated": updated,
+                "conflicts": conflicts,
+                "errors": errors
             }
         )

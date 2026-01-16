@@ -187,6 +187,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             "adjustment_quantity",
             "adjustment_status",
             "ending_stock",
+            "version"
         ]
 
     def get_initial_stock(self, obj):
