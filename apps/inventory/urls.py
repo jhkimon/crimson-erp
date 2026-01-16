@@ -4,6 +4,8 @@ from .views import (
     ProductOptionListView,
     InventoryCategoryListView,
     InventoryItemView,
+    ProductCategoryView,
+    ProductListSimpleView,
     # Upload
     ProductVariantExcelUploadView,
     # ProductVariant
@@ -22,6 +24,16 @@ from .views import (
 
 urlpatterns = [
     path("", ProductOptionListView.as_view(), name="inventory_options"),
+    path(
+        "products/",
+        ProductListSimpleView.as_view(),
+        name="inventory-product-list"
+    ),
+    path(
+        "products/<str:product_id>/categories/",
+        ProductCategoryView.as_view(),
+        name="inventory-product-category"
+    ),
     path("category/", InventoryCategoryListView.as_view(), name="inventory-category"),
     path("variants/", ProductVariantView.as_view(), name="variant"),
     path("variants/export/", ProductVariantExportView.as_view(), name="variant-export"),

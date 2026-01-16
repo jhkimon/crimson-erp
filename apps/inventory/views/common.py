@@ -10,14 +10,15 @@ from drf_yasg.utils import swagger_auto_schema
 
 # Serializer, Model
 from ..serializers import (
-    InventoryItemSummarySerializer
+    InventoryItemSummarySerializer,
+    ProductSimpleSerializer,
+    ProductCategorySerializer
 )
 
 from ..models import (
     InventoryItem,
     ProductVariant
 )
-
 
 # 빠른 값 조회용 엔드포인트
 class ProductOptionListView(APIView):
@@ -104,3 +105,52 @@ class InventoryCategoryListView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+class ProductListSimpleView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="상품 목록 조회",
+        operation_description="product_id, name, online_name 반환",
+        responses={200: ProductSimpleSerializer(many=True)},
+        tags=["inventory - View"]
+    )
+    def get(self, request):
+
+        qs = InventoryItem.objects.filter(is_active=True)
+
+        serializer = ProductSimpleSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class ProductCategoryView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="상품 카테고리 조회",
+        operation_description="해당 상품의 카테고리 정보 반환",
+        manual_parameters=[
+            openapi.Parameter(
+                "product_id",
+                openapi.IN_PATH,
+                type=openapi.TYPE_STRING,
+                required=True,
+            )
+        ],
+        responses={200: ProductCategorySerializer},
+        tags=["inventory - View"]
+    )
+    def get(self, request, product_id):
+
+        try:
+            product = InventoryItem.objects.get(
+                product_id=product_id,
+                is_active=True
+            )
+        except InventoryItem.DoesNotExist:
+            return Response(
+                {"detail": "존재하지 않는 상품입니다."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ProductCategorySerializer(product)
+        return Response(serializer.data, status=status.HTTP_200_OK)

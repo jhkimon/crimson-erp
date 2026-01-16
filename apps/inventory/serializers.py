@@ -483,3 +483,25 @@ class InventoryAdjustmentCreateSerializer(serializers.ModelSerializer):
             created_by=created_by,
             **validated_data
         )
+    
+
+# 상품 목록용
+class ProductSimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "product_id",
+            "name",
+            "online_name",
+        ]
+
+
+# 상품 카테고리용
+class ProductCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "big_category",
+            "middle_category",
+            "category",
+        ]
