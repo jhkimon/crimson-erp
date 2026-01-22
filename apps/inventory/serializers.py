@@ -45,7 +45,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     description = serializers.CharField(source="product.description", read_only=True)
 
     detail_option = serializers.CharField(read_only=True)
-    stock = serializers.SerializerMethodField()
+    # stock = serializers.SerializerMethodField()
     channels = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
@@ -60,9 +60,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "variant_code",  # variant_code
             "option",  # 옵션
             "detail_option",
-            "stock",
+            # "stock",
             "price",  # 가격
-            "min_stock",  # 최소재고
+            # "min_stock",  # 최소재고
             "description",  # 상품설명
             "memo",  # 메모
             "channels",  # 온라인/오프라인 태그
@@ -187,6 +187,7 @@ class ProductVariantStatusSerializer(serializers.ModelSerializer):
             "adjustment_quantity",
             "adjustment_status",
             "ending_stock",
+            "version"
         ]
 
     def get_initial_stock(self, obj):
@@ -482,3 +483,25 @@ class InventoryAdjustmentCreateSerializer(serializers.ModelSerializer):
             created_by=created_by,
             **validated_data
         )
+    
+
+# 상품 목록용
+class ProductSimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "product_id",
+            "name",
+            "online_name",
+        ]
+
+
+# 상품 카테고리용
+class ProductCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "big_category",
+            "middle_category",
+            "category",
+        ]

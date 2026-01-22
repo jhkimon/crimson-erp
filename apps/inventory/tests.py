@@ -12,9 +12,16 @@ from apps.inventory.models import (
     InventoryAdjustment,
     ProductVariantStatus
 )
+
+from apps.orders.models import (
+    Order,
+    OrderItem
+)
 from apps.inventory.utils.variant_code import build_variant_code
 from django.contrib.auth import get_user_model
 from apps.inventory.utils.monthly_snapshot import rollover_variant_status
+from datetime import datetime
+from django.utils import timezone
 
 class ExcelUploadTestMixin:
     def make_excel_file(self, rows: list[dict]):
@@ -933,3 +940,175 @@ class ProductVariantExcelUploadMultiOptionTest(ExcelUploadTestMixin, APITestCase
 
         self.assertEqual(ProductVariant.objects.count(), 2)
 
+
+
+class ProductSimpleListTest(APITestCase):
+
+    def setUp(self):
+        InventoryItem.objects.create(
+            product_id="P11111",
+            name="상품1",
+            online_name="상품1 온라인"
+        )
+        InventoryItem.objects.create(
+            product_id="P22222",
+            name="상품2"
+        )
+
+    def test_get_product_list(self):
+        url = reverse("inventory-product-list")
+        res = self.client.get(url)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 2)
+
+        row = res.data[0]
+        self.assertIn("product_id", row)
+        self.assertIn("name", row)
+
+
+class ProductCategoryViewTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P33333",
+            name="카테고리 상품",
+            big_category="STORE",
+            middle_category="FASHION",
+            category="의류"
+        )
+
+    def test_get_categories(self):
+        url = reverse(
+            "inventory-product-category",
+            args=[self.product.product_id]
+        )
+        res = self.client.get(url)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["big_category"], "STORE")
+        self.assertEqual(res.data["middle_category"], "FASHION")
+        self.assertEqual(res.data["category"], "의류")
+
+class SyncInboundFromOrdersTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P80000",
+            name="입고상품"
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P80000-A",
+            option="A"
+        )
+
+        self.order = Order.objects.create(
+            supplier=None,
+            order_date="2026-02-01",
+            expected_delivery_date="2026-02-10",
+            status="COMPLETED",
+            completed_at = timezone.make_aware(
+                datetime(2026,2,5)
+            )
+        )
+
+        OrderItem.objects.create(
+            order=self.order,
+            variant=self.variant,
+            item_name="입고상품",
+            quantity=7,
+            unit_price=1000
+        )
+
+    def test_sync_inbound(self):
+        url = reverse(
+            "inventory-sync-inbound",
+            args=[2026, 2]
+        )
+
+        res = self.client.post(url)
+        self.assertEqual(res.status_code, 200)
+
+        status_obj = ProductVariantStatus.objects.get(
+            year=2026,
+            month=2,
+            variant=self.variant
+        )
+        self.assertEqual(status_obj.inbound_quantity, 7)
+
+
+class VariantStatusBulkUpdateTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P70000",
+            name="벌크상품"
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P70000-A",
+            option="A"
+        )
+
+        self.status = ProductVariantStatus.objects.create(
+            year=2026,
+            month=3,
+            product=self.product,
+            variant=self.variant,
+            inbound_quantity=1
+        )
+
+    def test_bulk_update(self):
+        url = reverse("variant-status-bulk")
+
+        payload = {
+            "year": 2026,
+            "month": 3,
+            "rows": [
+                {
+                    "variant_code": self.variant.variant_code,
+                    "inbound_quantity": 99,
+                    "version": 0
+                }
+            ]
+        }
+
+        res = self.client.patch(url, payload, format="json")
+        self.assertEqual(res.status_code, 200)
+
+        self.status.refresh_from_db()
+        self.assertEqual(self.status.inbound_quantity, 99)
+
+class VariantStatusDeleteTest(APITestCase):
+
+    def setUp(self):
+        self.product = InventoryItem.objects.create(
+            product_id="P60000",
+            name="삭제상품"
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product,
+            variant_code="P60000-A",
+            option="A"
+        )
+
+        self.status = ProductVariantStatus.objects.create(
+            year=2026,
+            month=4,
+            product=self.product,
+            variant=self.variant
+        )
+
+    def test_delete_row(self):
+        url = reverse(
+            "variant-status-detail",
+            args=[2026, 4, self.variant.variant_code]
+        )
+
+        res = self.client.delete(url)
+        self.assertEqual(res.status_code, 200)
+
+        self.assertEqual(
+            ProductVariantStatus.objects.count(), 0
+        )

@@ -181,6 +181,12 @@ class ProductVariantView(APIView):
                 type=openapi.TYPE_INTEGER,
             ),
             openapi.Parameter(
+                "page_size",
+                openapi.IN_QUERY,
+                description="페이지당 데이터 개수 (default = 10)",
+                type=openapi.TYPE_INTEGER,
+            ),
+            openapi.Parameter(
                 "ordering",
                 openapi.IN_QUERY,
                 type=openapi.TYPE_STRING,
@@ -220,9 +226,13 @@ class ProductVariantView(APIView):
         for backend in list(self.filter_backends):
             queryset = backend().filter_queryset(request, queryset, self)
 
-        # 🔹 pagination
         paginator = PageNumberPagination()
-        paginator.page_size = 10
+        page_size = request.query_params.get("page_size", 10)
+
+        try:
+            paginator.page_size = int(page_size)
+        except ValueError:
+            paginator.page_size = 10
         page = paginator.paginate_queryset(queryset, request, view=self)
 
         # 🔹 serializer (context 전달)
