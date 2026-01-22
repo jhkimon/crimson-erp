@@ -115,6 +115,7 @@ jobs:
                       # 필요 시 .env를 읽는 로직을 settings.py에 포함시켜둔 상태여야 함
 
                       python manage.py migrate inventory 0002_inventoryadjustment_month_inventoryadjustment_year_and_more --fake || true
+                      python manage.py migrate inventory 0003_delete_inventorycategory_and_more --fake || true
                       python manage.py migrate --noinput
                       python manage.py collectstatic --noinput
 
